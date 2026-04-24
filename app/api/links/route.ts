@@ -7,22 +7,36 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
-  const status = searchParams.get('status')
   const category = searchParams.get('category')
+  const filter = searchParams.get('filter') || 'all'
+  const page = parseInt(searchParams.get('page') || '1')
+  const limit = parseInt(searchParams.get('limit') || '20')
+  const offset = (page - 1) * limit
 
   let query = supabase
     .from('links')
-    .select('*')
+    .select('*', { count: 'exact' })
     .eq('user_id', user.id)
-    .order('is_favorite', { ascending: false })
-    .order('created_at', { ascending: false })
 
-  if (status && status !== 'all') query = query.eq('status', status)
+  if (filter === 'favorite') query = query.eq('is_favorite', true)
+  else if (filter === 'no_price') query = query.is('price', null)
+
   if (category && category !== '전체') query = query.eq('category', category)
 
-  const { data, error } = await query
+  query = query
+    .order('is_favorite', { ascending: false })
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  const { data, error, count } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data)
+
+  return NextResponse.json({
+    items: data || [],
+    total: count || 0,
+    page,
+    hasMore: (offset + limit) < (count || 0),
+  })
 }
 
 export async function POST(req: NextRequest) {
@@ -31,7 +45,6 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-
   const { data: existing } = await supabase
     .from('links')
     .select('id, title')
@@ -39,9 +52,7 @@ export async function POST(req: NextRequest) {
     .eq('url', body.url)
     .single()
 
-  if (existing) {
-    return NextResponse.json({ error: 'DUPLICATE', existing }, { status: 409 })
-  }
+  if (existing) return NextResponse.json({ error: 'DUPLICATE', existing }, { status: 409 })
 
   const { data, error } = await supabase
     .from('links')
@@ -55,9 +66,7 @@ export async function POST(req: NextRequest) {
       favicon: body.favicon,
       price: body.price || null,
       category: body.category || '기타',
-      tags: body.tags || [],
       is_favorite: false,
-      status: 'wish',
       memo: null,
     })
     .select()

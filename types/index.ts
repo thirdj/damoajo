@@ -1,6 +1,6 @@
-export type LinkStatus = 'wish' | 'bought' | 'archived'
 export type ViewMode = 'grid2' | 'grid3' | 'list'
 export type SortMode = 'newest' | 'oldest' | 'price_asc' | 'price_desc' | 'site'
+export type FilterMode = 'all' | 'favorite' | 'no_price'
 
 export interface LinkItem {
   id: string
@@ -15,9 +15,7 @@ export interface LinkItem {
   last_price: string | null
   price_updated_at: string | null
   category: string
-  tags: string[]
   is_favorite: boolean
-  status: LinkStatus
   memo: string | null
   created_at: string
   updated_at: string
@@ -46,4 +44,14 @@ export interface PriceHistory {
   old_price: string | null
   new_price: string | null
   changed_at: string
+}
+
+export interface PriceAlert {
+  id: string
+  link_id: string
+  link_title: string
+  old_price: string | null
+  new_price: string | null
+  is_read: boolean
+  created_at: string
 }

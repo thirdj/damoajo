@@ -1,15 +1,15 @@
 'use client'
-import { LayoutGrid, List, Grid3X3, ArrowUpDown, Star } from 'lucide-react'
-import { ViewMode, SortMode } from '@/types'
+import { LayoutGrid, List, Grid3X3, ArrowUpDown } from 'lucide-react'
+import { ViewMode, SortMode, FilterMode } from '@/types'
 
 interface Props {
   view: ViewMode
-  filter: string
+  filter: FilterMode
   sort: SortMode
   onViewChange: (v: ViewMode) => void
-  onFilterChange: (f: string) => void
+  onFilterChange: (f: FilterMode) => void
   onSortChange: (s: SortMode) => void
-  totalCounts: { all: number; wish: number; bought: number; archived: number }
+  totalCount: number
   totalBudget: string | null
 }
 
@@ -21,31 +21,26 @@ const SORT_OPTIONS: { value: SortMode; label: string }[] = [
   { value: 'site', label: '사이트별' },
 ]
 
-export default function Toolbar({ view, filter, sort, onViewChange, onFilterChange, onSortChange, totalCounts, totalBudget }: Props) {
-  const filters = [
-    { key: 'all', label: `전체 ${totalCounts.all}` },
-    { key: 'wish', label: `위시 ${totalCounts.wish}` },
-    { key: 'bought', label: `완료 ${totalCounts.bought}` },
-    { key: 'archived', label: `보관 ${totalCounts.archived}` },
-    { key: 'favorite', label: '⭐' },
-  ]
+const FILTERS: { key: FilterMode; label: string }[] = [
+  { key: 'all', label: '전체' },
+  { key: 'favorite', label: '⭐ 즐겨찾기' },
+  { key: 'no_price', label: '가격 없음' },
+]
 
+export default function Toolbar({ view, filter, sort, onViewChange, onFilterChange, onSortChange, totalCount, totalBudget }: Props) {
   return (
     <div className="space-y-2 mb-4">
       <div className="flex items-center justify-between gap-2">
-        {/* 상태 필터 - 모바일 스크롤 가능 */}
-        <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1 overflow-x-auto flex-shrink min-w-0">
-          {filters.map(f => (
+        <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1 overflow-x-auto flex-1 min-w-0">
+          {FILTERS.map(f => (
             <button key={f.key} onClick={() => onFilterChange(f.key)}
-              className={`text-xs h-7 px-2.5 rounded-lg whitespace-nowrap transition-all flex-shrink-0 ${
+              className={`text-xs h-7 px-3 rounded-lg whitespace-nowrap transition-all flex-shrink-0 ${
                 filter === f.key ? 'bg-white text-gray-900 shadow-sm font-semibold' : 'text-gray-500'
               }`}>
               {f.label}
             </button>
           ))}
         </div>
-
-        {/* 뷰 전환 */}
         <div className="flex items-center gap-0.5 border border-gray-200 rounded-xl p-1 bg-white flex-shrink-0">
           {[
             { key: 'grid2' as ViewMode, Icon: LayoutGrid },
@@ -60,7 +55,6 @@ export default function Toolbar({ view, filter, sort, onViewChange, onFilterChan
         </div>
       </div>
 
-      {/* 정렬 + 예산 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <ArrowUpDown size={11} className="text-gray-400" />
@@ -68,10 +62,11 @@ export default function Toolbar({ view, filter, sort, onViewChange, onFilterChan
             className="text-xs text-gray-600 bg-transparent border-none outline-none cursor-pointer">
             {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
+          <span className="text-xs text-gray-400">· {totalCount}개</span>
         </div>
         {totalBudget && (
-          <div className="text-xs text-gray-500 bg-blue-50 px-3 py-1 rounded-full">
-            위시 총액 <span className="font-bold text-blue-600">{totalBudget}</span>
+          <div className="text-xs bg-blue-50 px-3 py-1 rounded-full">
+            총액 <span className="font-bold text-blue-600">{totalBudget}</span>
           </div>
         )}
       </div>

@@ -2,16 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
-* { box-sizing: border-box; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
-body {
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 
-/* 모바일 탭 하이라이트 제거 */
-* { -webkit-tap-highlight-color: transparent; }
-
-/* 모바일 스크롤바 숨김 */
-.overflow-x-auto::-webkit-scrollbar { display: none; }
-.overflow-x-auto { -ms-overflow-style: none; scrollbar-width: none; }
+/* 스크롤바 숨김 */
+.overflow-x-auto::-webkit-scrollbar,
+.overflow-y-auto::-webkit-scrollbar { display: none; }
+.overflow-x-auto, .overflow-y-auto { -ms-overflow-style: none; scrollbar-width: none; }

@@ -1,43 +1,86 @@
 'use client'
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
-import { LinkItem, ViewMode, SortMode, Category } from '@/types'
+import { LinkItem, ViewMode, SortMode, FilterMode, Category } from '@/types'
 import AddLinkBar from '@/components/AddLinkBar'
 import LinkCard from '@/components/LinkCard'
+import SkeletonCard from '@/components/SkeletonCard'
 import Toolbar from '@/components/Toolbar'
 import EditModal from '@/components/EditModal'
 import PriceHistoryModal from '@/components/PriceHistoryModal'
 import SearchBar from '@/components/SearchBar'
 import ShareButton from '@/components/ShareButton'
 import ImportExportModal from '@/components/ImportExportModal'
-import { LogOut, Plus, X, MoreVertical, Star } from 'lucide-react'
+import PriceAlertBell from '@/components/PriceAlertBell'
+import { Plus, X, MoreVertical, LogOut } from 'lucide-react'
 
 function parsePrice(p: string | null): number {
   if (!p) return 0
   return parseInt(p.replace(/[^0-9]/g, '')) || 0
 }
 
+const PAGE_SIZE = 20
+
 export default function DashboardPage() {
   const supabase = createClient()
   const [items, setItems] = useState<LinkItem[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [hasMore, setHasMore] = useState(false)
   const [view, setView] = useState<ViewMode>('grid2')
-  const [filter, setFilter] = useState('all')
+  const [filter, setFilter] = useState<FilterMode>('all')
   const [sort, setSort] = useState<SortMode>('newest')
   const [categoryFilter, setCategoryFilter] = useState('전체')
   const [categories, setCategories] = useState<Category[]>([])
   const [editItem, setEditItem] = useState<LinkItem | null>(null)
   const [priceHistoryItem, setPriceHistoryItem] = useState<{ id: string; title: string } | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [userEmail, setUserEmail] = useState('')
+  const [initialLoading, setInitialLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [search, setSearch] = useState('')
   const [showImportExport, setShowImportExport] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
-  const [tagFilter, setTagFilter] = useState('')
   const [showAddLink, setShowAddLink] = useState(false)
+  const observerRef = useRef<IntersectionObserver | null>(null)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
 
-  const fetchLinks = useCallback(async () => {
-    const res = await fetch('/api/links')
-    if (res.ok) setItems(await res.json())
+  // auth 최적화 - 캐시된 세션 먼저 사용
+  useEffect(() => {
+    const init = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) { window.location.href = '/auth'; return }
+
+      // 병렬로 데이터 패치
+      await Promise.all([
+        fetchPage(1, filter, categoryFilter, true),
+        fetchCategories(),
+      ])
+      setInitialLoading(false)
+    }
+    init()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const fetchPage = useCallback(async (
+    p: number,
+    f: FilterMode,
+    cat: string,
+    reset: boolean
+  ) => {
+    const params = new URLSearchParams({
+      page: String(p),
+      limit: String(PAGE_SIZE),
+      filter: f,
+    })
+    if (cat !== '전체') params.set('category', cat)
+
+    const res = await fetch(`/api/links?${params}`)
+    if (!res.ok) return
+    const data = await res.json()
+
+    setItems(prev => reset ? data.items : [...prev, ...data.items])
+    setTotal(data.total)
+    setHasMore(data.hasMore)
+    setPage(p)
   }, [])
 
   const fetchCategories = useCallback(async () => {
@@ -48,16 +91,31 @@ export default function DashboardPage() {
     }
   }, [])
 
+  // 필터 변경 시 리셋
+  const handleFilterChange = useCallback((f: FilterMode) => {
+    setFilter(f)
+    setInitialLoading(true)
+    fetchPage(1, f, categoryFilter, true).then(() => setInitialLoading(false))
+  }, [categoryFilter, fetchPage])
+
+  const handleCategoryChange = useCallback((cat: string) => {
+    setCategoryFilter(cat)
+    setInitialLoading(true)
+    fetchPage(1, filter, cat, true).then(() => setInitialLoading(false))
+  }, [filter, fetchPage])
+
+  // Infinite scroll
   useEffect(() => {
-    const init = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { window.location.href = '/auth'; return }
-      setUserEmail(user.email || '')
-      await Promise.all([fetchLinks(), fetchCategories()])
-      setLoading(false)
-    }
-    init()
-  }, [supabase, fetchLinks, fetchCategories])
+    if (observerRef.current) observerRef.current.disconnect()
+    observerRef.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore && !loadingMore) {
+        setLoadingMore(true)
+        fetchPage(page + 1, filter, categoryFilter, false).then(() => setLoadingMore(false))
+      }
+    }, { threshold: 0.1 })
+    if (sentinelRef.current) observerRef.current.observe(sentinelRef.current)
+    return () => observerRef.current?.disconnect()
+  }, [hasMore, loadingMore, page, filter, categoryFilter, fetchPage])
 
   const handleAdd = async (linkData: Omit<LinkItem, 'id' | 'user_id' | 'created_at' | 'updated_at'>) => {
     const res = await fetch('/api/links', {
@@ -69,6 +127,7 @@ export default function DashboardPage() {
     if (res.ok) {
       const newItem = await res.json()
       setItems(prev => [newItem, ...prev])
+      setTotal(t => t + 1)
     }
     return {}
   }
@@ -82,26 +141,22 @@ export default function DashboardPage() {
     if (res.ok) {
       const updated = await res.json()
       setItems(prev => prev.map(i => i.id === id ? updated : i))
-      if (updated.priceChanged) alert(`💰 가격 변동!\n${updated.oldPrice} → ${updates.price}`)
     }
   }
 
   const handleDelete = async (id: string) => {
     if (!confirm('삭제하시겠습니까?')) return
     const res = await fetch(`/api/links/${id}`, { method: 'DELETE' })
-    if (res.ok) setItems(prev => prev.filter(i => i.id !== id))
+    if (res.ok) {
+      setItems(prev => prev.filter(i => i.id !== id))
+      setTotal(t => t - 1)
+    }
   }
 
-  const handleToggleFavorite = async (id: string, val: boolean) => {
-    await handleEdit(id, { is_favorite: val })
-  }
-
-  const handleStatusChange = async (id: string, status: LinkItem['status']) => {
-    await handleEdit(id, { status })
-  }
+  const handleToggleFavorite = (id: string, val: boolean) => handleEdit(id, { is_favorite: val })
 
   const handleAddCategory = async () => {
-    const name = prompt('새 카테고리 이름을 입력하세요:')
+    const name = prompt('새 카테고리 이름:')
     if (!name || categories.find(c => c.name === name)) return
     const res = await fetch('/api/categories', {
       method: 'POST',
@@ -115,11 +170,11 @@ export default function DashboardPage() {
   }
 
   const handleDeleteCategory = async (cat: Category) => {
-    if (!confirm(`"${cat.name}" 카테고리를 삭제할까요?`)) return
+    if (!confirm(`"${cat.name}" 삭제?`)) return
     const res = await fetch(`/api/categories/${cat.id}`, { method: 'DELETE' })
     if (res.ok) {
       setCategories(prev => prev.filter(c => c.id !== cat.id))
-      if (categoryFilter === cat.name) setCategoryFilter('전체')
+      if (categoryFilter === cat.name) handleCategoryChange('전체')
     }
   }
 
@@ -130,28 +185,17 @@ export default function DashboardPage() {
 
   const categoryNames = categories.map(c => c.name)
 
-  // 전체 태그 목록
-  const allTags = useMemo(() => {
-    const set = new Set<string>()
-    items.forEach(i => i.tags?.forEach(t => set.add(t)))
-    return Array.from(set)
-  }, [items])
-
-  const filtered = useMemo(() => {
+  // 클라이언트 정렬 + 검색
+  const displayed = useMemo(() => {
     let list = [...items]
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter(i =>
         i.title.toLowerCase().includes(q) ||
         (i.site_name || '').toLowerCase().includes(q) ||
-        i.category.toLowerCase().includes(q) ||
-        i.tags?.some(t => t.toLowerCase().includes(q))
+        i.category.toLowerCase().includes(q)
       )
     }
-    if (filter === 'favorite') list = list.filter(i => i.is_favorite)
-    else if (filter !== 'all') list = list.filter(i => i.status === filter)
-    if (categoryFilter !== '전체') list = list.filter(i => i.category === categoryFilter)
-    if (tagFilter) list = list.filter(i => i.tags?.includes(tagFilter))
     list.sort((a, b) => {
       if (sort === 'newest') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       if (sort === 'oldest') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
@@ -161,21 +205,13 @@ export default function DashboardPage() {
       return 0
     })
     return list
-  }, [items, search, filter, categoryFilter, sort, tagFilter])
+  }, [items, search, sort])
 
-  const counts = {
-    all: items.length,
-    wish: items.filter(i => i.status === 'wish').length,
-    bought: items.filter(i => i.status === 'bought').length,
-    archived: items.filter(i => i.status === 'archived').length,
-  }
-
-  // 위시 예산 합산 (원화)
   const totalBudget = useMemo(() => {
-    const wishItems = items.filter(i => i.status === 'wish' && i.price)
-    if (wishItems.length === 0) return null
-    const total = wishItems.reduce((sum, i) => sum + parsePrice(i.price), 0)
-    return '₩' + total.toLocaleString('ko-KR')
+    const priced = items.filter(i => i.price)
+    if (priced.length === 0) return null
+    const sum = priced.reduce((s, i) => s + parsePrice(i.price), 0)
+    return '₩' + sum.toLocaleString('ko-KR')
   }, [items])
 
   const gridClass =
@@ -183,66 +219,57 @@ export default function DashboardPage() {
     view === 'grid3' ? 'grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-2' :
     'flex flex-col gap-2'
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-gray-400">불러오는 중...</p>
-        </div>
-      </div>
-    )
-  }
+  const skeletonCount = view === 'list' ? 5 : view === 'grid3' ? 9 : 6
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-24">
+    <div className="min-h-screen bg-gray-50 pb-28">
       {/* 헤더 */}
       <header className="bg-white border-b border-gray-100 sticky top-0 z-40">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-xl">📦</span>
-            <span className="font-bold text-gray-900 tracking-tight text-lg">Damoajo</span>
+            <span className="font-black text-gray-900 tracking-tight text-lg">Damoajo</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            <PriceAlertBell />
             <ShareButton filter={filter} category={categoryFilter} />
-            {/* 더보기 메뉴 */}
             <div className="relative">
-              <button onClick={() => setShowMenu(v => !v)}
-                className="p-2 rounded-xl hover:bg-gray-100 text-gray-500">
+              <button onClick={() => setShowMenu(v => !v)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500">
                 <MoreVertical size={16} />
               </button>
               {showMenu && (
-                <div className="absolute right-0 top-10 bg-white border border-gray-100 rounded-2xl shadow-xl w-44 py-1.5 z-50">
-                  <button onClick={() => { setShowImportExport(true); setShowMenu(false) }}
-                    className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50">
-                    📤 내보내기 / 가져오기
-                  </button>
-                  <div className="h-px bg-gray-100 my-1" />
-                  <div className="px-4 py-2 text-xs text-gray-400 truncate">{userEmail}</div>
-                  <button onClick={handleLogout}
-                    className="w-full text-left px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 flex items-center gap-2">
-                    <LogOut size={14} /> 로그아웃
-                  </button>
-                </div>
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setShowMenu(false)} />
+                  <div className="absolute right-0 top-10 bg-white border border-gray-100 rounded-2xl shadow-xl w-44 py-1.5 z-50">
+                    <button onClick={() => { setShowImportExport(true); setShowMenu(false) }}
+                      className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50">
+                      📤 내보내기 / 가져오기
+                    </button>
+                    <div className="h-px bg-gray-100 my-1" />
+                    <button onClick={handleLogout}
+                      className="w-full text-left px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 flex items-center gap-2">
+                      <LogOut size={14} /> 로그아웃
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </div>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
-        {/* 검색 */}
+      <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4">
         <SearchBar value={search} onChange={setSearch} />
 
         {/* 카테고리 필터 */}
-        <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+        <div className="flex items-center gap-1.5 mb-3 overflow-x-auto pb-1">
           {['전체', ...categoryNames].map(cat => (
-            <div key={cat} className="relative group">
-              <button onClick={() => setCategoryFilter(cat)}
-                className={`text-xs h-7 px-3 rounded-full border transition-all ${
+            <div key={cat} className="relative group flex-shrink-0">
+              <button onClick={() => handleCategoryChange(cat)}
+                className={`text-xs h-7 px-3 rounded-full border transition-all whitespace-nowrap ${
                   categoryFilter === cat
                     ? 'bg-gray-900 text-white border-gray-900'
-                    : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
+                    : 'bg-white text-gray-500 border-gray-200'
                 }`}>
                 {cat}
               </button>
@@ -255,77 +282,75 @@ export default function DashboardPage() {
               )}
             </div>
           ))}
-          <button onClick={handleAddCategory}
-            className="text-xs h-7 px-3 rounded-full border border-dashed border-gray-300 text-gray-400 hover:border-gray-400 flex items-center gap-1">
+          <button onClick={handleAddCategory} className="flex-shrink-0 text-xs h-7 px-3 rounded-full border border-dashed border-gray-300 text-gray-400 hover:border-gray-400 whitespace-nowrap flex items-center gap-1">
             <Plus size={10} /> 추가
           </button>
         </div>
 
-        {/* 태그 필터 */}
-        {allTags.length > 0 && (
-          <div className="flex items-center gap-1.5 mb-3 flex-wrap">
-            <span className="text-xs text-gray-400">태그:</span>
-            {allTags.map(t => (
-              <button key={t} onClick={() => setTagFilter(tagFilter === t ? '' : t)}
-                className={`text-xs h-6 px-2.5 rounded-full border transition-all ${
-                  tagFilter === t
-                    ? 'bg-purple-600 text-white border-purple-600'
-                    : 'bg-white text-purple-600 border-purple-200 hover:border-purple-400'
-                }`}>
-                #{t}
-              </button>
-            ))}
-          </div>
-        )}
-
         <Toolbar
           view={view} filter={filter} sort={sort}
-          onViewChange={setView} onFilterChange={setFilter} onSortChange={setSort}
-          totalCounts={counts} totalBudget={totalBudget}
+          onViewChange={setView} onFilterChange={handleFilterChange} onSortChange={setSort}
+          totalCount={total} totalBudget={totalBudget}
         />
 
-        {filtered.length === 0 ? (
+        {/* 아이템 목록 */}
+        {initialLoading ? (
+          <div className={gridClass}>
+            {Array.from({ length: skeletonCount }).map((_, i) => (
+              <SkeletonCard key={i} view={view} />
+            ))}
+          </div>
+        ) : displayed.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-gray-400">
             <span className="text-5xl mb-4">📦</span>
             <p className="text-sm font-medium">{search ? '검색 결과가 없습니다.' : '저장된 링크가 없습니다.'}</p>
-            <p className="text-xs mt-1">{search ? '다른 키워드로 검색해보세요.' : '+ 버튼으로 링크를 저장해보세요.'}</p>
+            <p className="text-xs mt-1">{search ? '다른 키워드로 검색해보세요.' : '+ 버튼으로 저장해보세요.'}</p>
           </div>
         ) : (
-          <div className={gridClass}>
-            {filtered.map(item => (
-              <LinkCard
-                key={item.id}
-                item={item}
-                view={view}
-                onEdit={setEditItem}
-                onDelete={handleDelete}
-                onStatusChange={handleStatusChange}
-                onPriceHistory={() => setPriceHistoryItem({ id: item.id, title: item.title })}
-                onToggleFavorite={handleToggleFavorite}
-              />
-            ))}
-          </div>
+          <>
+            <div className={gridClass}>
+              {displayed.map(item => (
+                <LinkCard
+                  key={item.id}
+                  item={item}
+                  view={view}
+                  onEdit={setEditItem}
+                  onDelete={handleDelete}
+                  onPriceHistory={() => setPriceHistoryItem({ id: item.id, title: item.title })}
+                  onToggleFavorite={handleToggleFavorite}
+                />
+              ))}
+            </div>
+
+            {/* 무한스크롤 sentinel */}
+            <div ref={sentinelRef} className="h-10 mt-4 flex items-center justify-center">
+              {loadingMore && (
+                <div className={gridClass + ' w-full'}>
+                  {Array.from({ length: view === 'list' ? 2 : 4 }).map((_, i) => (
+                    <SkeletonCard key={i} view={view} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
         )}
       </main>
 
       {/* 오른쪽 하단 + 버튼 */}
       <button
         onClick={() => setShowAddLink(true)}
-        className="fixed bottom-6 right-5 w-14 h-14 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-xl flex items-center justify-center text-2xl font-light transition-all hover:scale-105 active:scale-95 z-40"
+        className="fixed bottom-6 right-5 w-14 h-14 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-full shadow-2xl flex items-center justify-center text-3xl font-light transition-all z-40"
       >
         +
       </button>
 
-      {/* AddLink 모달 */}
       {showAddLink && (
-        <div className="fixed inset-0 z-50">
-          <AddLinkBar
-            categories={categoryNames}
-            onAdd={handleAdd}
-            defaultOpen={true}
-            onClose={() => setShowAddLink(false)}
-          />
-        </div>
+        <AddLinkBar
+          categories={categoryNames}
+          onAdd={handleAdd}
+          defaultOpen={true}
+          onClose={() => setShowAddLink(false)}
+        />
       )}
 
       <EditModal
@@ -345,12 +370,9 @@ export default function DashboardPage() {
       {showImportExport && (
         <ImportExportModal
           onClose={() => setShowImportExport(false)}
-          onImportDone={fetchLinks}
+          onImportDone={() => fetchPage(1, filter, categoryFilter, true)}
         />
       )}
-
-      {/* 메뉴 외부 클릭 닫기 */}
-      {showMenu && <div className="fixed inset-0 z-30" onClick={() => setShowMenu(false)} />}
     </div>
   )
 }
