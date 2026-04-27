@@ -24,37 +24,58 @@ export default function LinkCard({ item, view, onEdit, onDelete, onPriceHistory,
   const displayPrice = formatPrice(item.price)
   const hasPriceChange = item.last_price && item.last_price !== item.price
 
+  // ── 리스트 뷰 ──
   if (view === 'list') {
     return (
-      <div className="flex items-center gap-3 bg-white border border-gray-100 rounded-xl px-3 py-3 hover:border-gray-200 transition-colors group">
-        <div className="w-14 h-14 rounded-xl bg-gray-50 flex-shrink-0 overflow-hidden flex items-center justify-center">
+      <div className="flex items-center gap-3 bg-white border border-gray-100 rounded-xl px-3 py-2.5 hover:border-gray-200 transition-colors">
+        {/* 썸네일 */}
+        <div className="w-12 h-12 rounded-lg bg-gray-50 flex-shrink-0 overflow-hidden flex items-center justify-center">
           {item.thumbnail
-            ? <Image src={item.thumbnail} alt="" width={56} height={56} className="object-cover w-full h-full" unoptimized loading="lazy" />
+            ? <Image src={item.thumbnail} alt="" width={48} height={48} className="object-cover w-full h-full" unoptimized loading="lazy" />
             : item.favicon
-              ? <Image src={item.favicon} alt="" width={28} height={28} unoptimized />
-              : <span className="text-2xl">🔗</span>}
+              ? <Image src={item.favicon} alt="" width={24} height={24} unoptimized />
+              : <span className="text-xl">🔗</span>}
         </div>
+
+        {/* 제목 + 사이트 */}
         <div className="flex-1 min-w-0">
-          <a href={item.url} target="_blank" rel="noopener noreferrer"
-            className="text-sm font-semibold text-gray-900 hover:text-blue-600 line-clamp-1 block transition-colors">
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-semibold text-gray-900 hover:text-blue-600 transition-colors"
+            style={{
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              lineHeight: '1.35',
+            }}
+          >
             {item.title}
           </a>
-          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-            <span className="text-xs text-gray-400">{item.site_name || getSiteLabel(item.url)}</span>
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+            <span className="text-xs text-gray-400 truncate max-w-[120px]">
+              {item.site_name || getSiteLabel(item.url)}
+            </span>
             {displayPrice && (
-              <button onClick={onPriceHistory} className="text-xs font-bold text-blue-600 hover:underline">
+              <button onClick={onPriceHistory} className="text-xs font-bold text-blue-600 hover:underline flex-shrink-0">
                 {displayPrice}
-                {hasPriceChange && <span className="ml-1 text-[10px] text-green-500">↓변동</span>}
+                {hasPriceChange && <span className="ml-1 text-[10px] text-green-500">↓</span>}
               </button>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button onClick={() => onToggleFavorite(item.id, !item.is_favorite)}
-            className={`p-1.5 rounded-lg transition-colors ${item.is_favorite ? 'text-yellow-400' : 'text-gray-300 hover:text-yellow-400'}`}>
-            <Star size={14} fill={item.is_favorite ? 'currentColor' : 'none'} />
+
+        {/* 즐겨찾기 + 수정 + 삭제 — 항상 표시, 오른쪽 고정 */}
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          <button
+            onClick={() => onToggleFavorite(item.id, !item.is_favorite)}
+            className={`p-1.5 rounded-lg transition-colors ${item.is_favorite ? 'text-yellow-400' : 'text-gray-300 hover:text-yellow-400'}`}
+          >
+            <Star size={15} fill={item.is_favorite ? 'currentColor' : 'none'} />
           </button>
-          <button onClick={() => onEdit(item)} className="p-1.5 rounded-lg hover:bg-gray-50 text-gray-400 hover:text-gray-600">
+          <button onClick={() => onEdit(item)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600">
             <Pencil size={14} />
           </button>
           <button onClick={() => onDelete(item.id)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500">
@@ -65,6 +86,7 @@ export default function LinkCard({ item, view, onEdit, onDelete, onPriceHistory,
     )
   }
 
+  // ── 그리드 뷰 ──
   return (
     <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden hover:border-gray-200 hover:shadow-md transition-all group flex flex-col relative">
       {/* 즐겨찾기 - 오른쪽 상단 */}
@@ -115,7 +137,7 @@ export default function LinkCard({ item, view, onEdit, onDelete, onPriceHistory,
           <span className="text-[10px] text-gray-400 truncate">{item.site_name || getSiteLabel(item.url)}</span>
         </div>
 
-        {/* 제목 - flex-1 제거하고 고정 높이로 말줄임 보장 */}
+        {/* 제목 - 2줄 고정 말줄임 */}
         <div className="mb-2" style={{ minHeight: '2.6rem' }}>
           <a
             href={item.url}
