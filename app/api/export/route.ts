@@ -1,33 +1,28 @@
 import { NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import sql from '@/lib/db'
+import { requireUser } from '@/lib/auth'
 
 export async function GET() {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  const { data: links } = await supabase
-    .from('links')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
-
-  const { data: categories } = await supabase
-    .from('categories')
-    .select('*')
-    .eq('user_id', user.id)
-
-  const exportData = {
-    version: '1.0',
-    exported_at: new Date().toISOString(),
-    links: links || [],
-    categories: categories || [],
+  try {
+    const user = await requireUser()
+    const [links, categories] = await Promise.all([
+      sql`SELECT * FROM links WHERE user_id = ${user.id} ORDER BY created_at DESC`,
+      sql`SELECT * FROM categories WHERE user_id = ${user.id} ORDER BY created_at ASC`,
+    ])
+    const exportData = {
+      version: '2.0',
+      exported_at: new Date().toISOString(),
+      links,
+      categories,
+    }
+    return new NextResponse(JSON.stringify(exportData, null, 2), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Disposition': `attachment; filename="damoajo-export-${new Date().toISOString().slice(0,10)}.json"`,
+      },
+    })
+  } catch (e) {
+    if ((e as Error).message === 'Unauthorized') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
-
-  return new NextResponse(JSON.stringify(exportData, null, 2), {
-    headers: {
-      'Content-Type': 'application/json',
-      'Content-Disposition': `attachment; filename="damoajo-export-${new Date().toISOString().slice(0,10)}.json"`,
-    },
-  })
 }

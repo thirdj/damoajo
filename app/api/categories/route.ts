@@ -1,34 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import sql from '@/lib/db'
+import { requireUser } from '@/lib/auth'
 
 export async function GET() {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  const { data, error } = await supabase
-    .from('categories')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('created_at')
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data)
+  try {
+    const user = await requireUser()
+    const data = await sql`
+      SELECT id, name, color, created_at FROM categories
+      WHERE user_id = ${user.id} ORDER BY created_at ASC
+    `
+    return NextResponse.json(data)
+  } catch (e) {
+    if ((e as Error).message === 'Unauthorized') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  const { name, color } = await req.json()
-
-  const { data, error } = await supabase
-    .from('categories')
-    .insert({ user_id: user.id, name, color: color || '#3b82f6' })
-    .select()
-    .single()
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data, { status: 201 })
+  try {
+    const user = await requireUser()
+    const { name, color } = await req.json()
+    const [cat] = await sql`
+      INSERT INTO categories (user_id, name, color)
+      VALUES (${user.id}, ${name}, ${color || '#3b82f6'})
+      ON CONFLICT (user_id, name) DO NOTHING
+      RETURNING *
+    `
+    if (!cat) return NextResponse.json({ error: 'Already exists' }, { status: 409 })
+    return NextResponse.json(cat, { status: 201 })
+  } catch (e) {
+    if ((e as Error).message === 'Unauthorized') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
+  }
 }

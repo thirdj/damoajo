@@ -32,18 +32,35 @@ export default function ImportExportModal({ onClose, onImportDone }: Props) {
     setResult(null)
     try {
       const text = await file.text()
-      const json = JSON.parse(text)
+      
+      // JSON 파싱 테스트
+      let json
+      try {
+        json = JSON.parse(text)
+      } catch {
+        setError('JSON 파일을 읽지 못했어요. 파일이 올바른지 확인해주세요.')
+        setImporting(false)
+        return
+      }
+
       const res = await fetch('/api/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(json),
       })
+      
       const data = await res.json()
-      if (data.error) { setError(data.error); return }
+      console.log('Import result:', data) // 디버깅용
+      
+      if (data.error) { 
+        setError(data.error)
+        return 
+      }
       setResult(data)
       onImportDone()
-    } catch {
-      setError('파일 형식이 올바르지 않습니다.')
+    } catch (e) {
+      console.error('Import error:', e)
+      setError('가져오기 중 오류가 발생했습니다.')
     } finally {
       setImporting(false)
     }

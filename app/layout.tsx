@@ -1,4 +1,7 @@
 import type { Metadata, Viewport } from 'next'
+import { StackProvider, StackTheme } from '@stackframe/stack'
+import { stackServerApp } from '../stack'
+import { Suspense } from 'react'
 import './globals.css'
 
 export const viewport: Viewport = {
@@ -10,7 +13,7 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: 'Damoajo - 나만의 링크 보관함',
-  description: '쇼핑몰, SNS 링크를 한 곳에 모아두는 나만의 즐겨찾기',
+  description: '링크를 한 곳에 모아두는 나만의 즐겨찾기',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
@@ -27,14 +30,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ko">
       <head>
-        {/* iOS 홈화면 추가 최적화 */}
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="Damoajo" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <link rel="manifest" href="/manifest.json" />
       </head>
-      <body>{children}</body>
+      <body>
+        <Suspense fallback={
+          <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+            <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+          </div>
+        }>
+          <StackProvider app={stackServerApp}>
+            <StackTheme>
+              {children}
+            </StackTheme>
+          </StackProvider>
+        </Suspense>
+      </body>
     </html>
   )
 }

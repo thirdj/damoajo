@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { createClient } from '@/lib/supabase'
+import { useUser } from '@stackframe/stack'
 import { LinkItem, ViewMode, SortMode, FilterMode, Category } from '@/types'
 import AddLinkBar from '@/components/AddLinkBar'
 import LinkCard from '@/components/LinkCard'
@@ -10,7 +10,7 @@ import PriceHistoryModal from '@/components/PriceHistoryModal'
 import SearchBar from '@/components/SearchBar'
 import ImportExportModal from '@/components/ImportExportModal'
 import PriceAlertBell from '@/components/PriceAlertBell'
-import { Plus, X, MoreVertical, LogOut, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, X, MoreVertical, LogOut } from 'lucide-react'
 
 function parsePrice(p: string | null): number {
   if (!p) return 0
@@ -19,12 +19,11 @@ function parsePrice(p: string | null): number {
 
 const PAGE_SIZE = 30
 
-// 카드 스켈레톤
 function CardSkeleton({ view }: { view: ViewMode }) {
   if (view === 'list') {
     return (
       <div className="flex items-center gap-3 bg-white border border-gray-100 rounded-xl px-3 py-3 animate-pulse">
-        <div className="w-14 h-14 rounded-xl bg-gray-200 flex-shrink-0" />
+        <div className="w-12 h-12 rounded-lg bg-gray-200 flex-shrink-0" />
         <div className="flex-1 space-y-2">
           <div className="h-3.5 bg-gray-200 rounded-full w-3/4" />
           <div className="h-3 bg-gray-100 rounded-full w-1/2" />
@@ -45,7 +44,7 @@ function CardSkeleton({ view }: { view: ViewMode }) {
 }
 
 export default function DashboardPage() {
-  const supabase = createClient()
+  const user = useUser({ or: 'redirect' })
   const [items, setItems] = useState<LinkItem[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -62,17 +61,11 @@ export default function DashboardPage() {
   const [showImportExport, setShowImportExport] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [showAddLink, setShowAddLink] = useState(false)
-  const [authChecked, setAuthChecked] = useState(false)
 
   const fetchPage = useCallback(async (p: number, f: FilterMode, cat: string) => {
     setLoading(true)
-    const params = new URLSearchParams({
-      page: String(p),
-      limit: String(PAGE_SIZE),
-      filter: f,
-    })
+    const params = new URLSearchParams({ page: String(p), limit: String(PAGE_SIZE), filter: f })
     if (cat !== '전체') params.set('category', cat)
-
     const res = await fetch(`/api/links?${params}`)
     if (res.ok) {
       const data = await res.json()
@@ -93,21 +86,9 @@ export default function DashboardPage() {
   }, [])
 
   useEffect(() => {
-    const init = async () => {
-      // getSession() 은 캐시에서 바로 반환 → 빠름
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) { window.location.href = '/auth'; return }
-      setAuthChecked(true)
-
-      // 링크와 카테고리를 병렬로 fetch
-      await Promise.all([
-        fetchPage(1, 'all', '전체'),
-        fetchCategories(),
-      ])
-    }
-    init()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    if (!user) return
+    Promise.all([fetchPage(1, 'all', '전체'), fetchCategories()])
+  }, [user, fetchPage, fetchCategories])
 
   const handleFilterChange = useCallback((f: FilterMode) => {
     setFilter(f)
@@ -182,8 +163,8 @@ export default function DashboardPage() {
   }
 
   const handleLogout = async () => {
-    await supabase.auth.signOut()
-    window.location.href = '/auth'
+    await user?.signOut()
+    window.location.href = '/handler/sign-in'
   }
 
   const categoryNames = categories.map(c => c.name)
@@ -221,25 +202,13 @@ export default function DashboardPage() {
     view === 'grid3' ? 'grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-2' :
     'flex flex-col gap-2'
 
-  const skeletonCount = view === 'list' ? 6 : view === 'grid3' ? 9 : 6
+  const skeletonCount = view === 'list' ? 6 : 6
 
   const pageNumbers = useMemo(() => {
-    const delta = 2
     const range: number[] = []
-    for (let i = Math.max(1, page - delta); i <= Math.min(totalPages, page + delta); i++) {
-      range.push(i)
-    }
+    for (let i = Math.max(1, page - 2); i <= Math.min(totalPages, page + 2); i++) range.push(i)
     return range
   }, [page, totalPages])
-
-  // auth 확인 전에는 빈 화면
-  if (!authChecked) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-      </div>
-    )
-  }
 
   return (
     <div className="min-h-screen bg-gray-50 pb-6">
@@ -252,7 +221,6 @@ export default function DashboardPage() {
           </div>
           <div className="flex items-center gap-1">
             <PriceAlertBell />
-            {/* + 버튼 헤더에 */}
             <button
               onClick={() => setShowAddLink(true)}
               className="flex items-center gap-1 px-3 h-8 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-sm font-semibold rounded-xl transition-all"
@@ -294,9 +262,7 @@ export default function DashboardPage() {
             <div key={cat} className="relative group flex-shrink-0">
               <button onClick={() => handleCategoryChange(cat)}
                 className={`text-xs h-7 px-3 rounded-full border transition-all whitespace-nowrap ${
-                  categoryFilter === cat
-                    ? 'bg-gray-900 text-white border-gray-900'
-                    : 'bg-white text-gray-500 border-gray-200'
+                  categoryFilter === cat ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-500 border-gray-200'
                 }`}>
                 {cat}
               </button>
@@ -321,12 +287,9 @@ export default function DashboardPage() {
           totalCount={total} totalBudget={totalBudget}
         />
 
-        {/* 스켈레톤 or 콘텐츠 */}
         {loading ? (
           <div className={gridClass}>
-            {Array.from({ length: skeletonCount }).map((_, i) => (
-              <CardSkeleton key={i} view={view} />
-            ))}
+            {Array.from({ length: skeletonCount }).map((_, i) => <CardSkeleton key={i} view={view} />)}
           </div>
         ) : displayed.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-gray-400">
@@ -338,99 +301,58 @@ export default function DashboardPage() {
           <>
             <div className={gridClass}>
               {displayed.map(item => (
-                <LinkCard
-                  key={item.id}
-                  item={item}
-                  view={view}
-                  onEdit={setEditItem}
-                  onDelete={handleDelete}
+                <LinkCard key={item.id} item={item} view={view}
+                  onEdit={setEditItem} onDelete={handleDelete}
                   onPriceHistory={() => setPriceHistoryItem({ id: item.id, title: item.title })}
                   onToggleFavorite={handleToggleFavorite}
                 />
               ))}
             </div>
 
-            {/* 페이지네이션 */}
             {totalPages > 1 && (
               <div className="flex items-center justify-center gap-1.5 mt-8 mb-2">
                 <button onClick={() => handlePageChange(page - 1)} disabled={page === 1}
-                  className="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed">
-                  <ChevronLeft size={16} />
+                  className="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 disabled:opacity-40">
+                  ‹
                 </button>
-
-                {pageNumbers[0] > 1 && (
-                  <>
-                    <button onClick={() => handlePageChange(1)}
-                      className="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-sm text-gray-600 hover:border-gray-300">1</button>
-                    {pageNumbers[0] > 2 && <span className="text-gray-400 text-sm px-1">···</span>}
-                  </>
-                )}
-
+                {pageNumbers[0] > 1 && <>
+                  <button onClick={() => handlePageChange(1)} className="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-sm text-gray-600">1</button>
+                  {pageNumbers[0] > 2 && <span className="text-gray-400 text-sm px-1">···</span>}
+                </>}
                 {pageNumbers.map(p => (
                   <button key={p} onClick={() => handlePageChange(p)}
-                    className={`w-9 h-9 flex items-center justify-center rounded-xl text-sm font-medium transition-all ${
-                      p === page ? 'bg-blue-600 text-white border border-blue-600 shadow-sm' : 'border border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                    className={`w-9 h-9 flex items-center justify-center rounded-xl text-sm font-medium ${
+                      p === page ? 'bg-blue-600 text-white border border-blue-600' : 'border border-gray-200 bg-white text-gray-600'
                     }`}>
                     {p}
                   </button>
                 ))}
-
-                {pageNumbers[pageNumbers.length - 1] < totalPages && (
-                  <>
-                    {pageNumbers[pageNumbers.length - 1] < totalPages - 1 && (
-                      <span className="text-gray-400 text-sm px-1">···</span>
-                    )}
-                    <button onClick={() => handlePageChange(totalPages)}
-                      className="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-sm text-gray-600 hover:border-gray-300">
-                      {totalPages}
-                    </button>
-                  </>
-                )}
-
+                {pageNumbers[pageNumbers.length - 1] < totalPages && <>
+                  {pageNumbers[pageNumbers.length - 1] < totalPages - 1 && <span className="text-gray-400 text-sm px-1">···</span>}
+                  <button onClick={() => handlePageChange(totalPages)} className="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-sm text-gray-600">{totalPages}</button>
+                </>}
                 <button onClick={() => handlePageChange(page + 1)} disabled={page === totalPages}
-                  className="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed">
-                  <ChevronRight size={16} />
+                  className="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 disabled:opacity-40">
+                  ›
                 </button>
               </div>
             )}
-
             {totalPages > 1 && (
-              <p className="text-center text-xs text-gray-400 mb-4">
-                {page} / {totalPages} 페이지 · 총 {total}개
-              </p>
+              <p className="text-center text-xs text-gray-400 mb-4">{page} / {totalPages} 페이지 · 총 {total}개</p>
             )}
           </>
         )}
       </main>
 
       {showAddLink && (
-        <AddLinkBar
-          categories={categoryNames}
-          onAdd={handleAdd}
-          defaultOpen={true}
-          onClose={() => setShowAddLink(false)}
-        />
+        <AddLinkBar categories={categoryNames} onAdd={handleAdd} defaultOpen={true} onClose={() => setShowAddLink(false)} />
       )}
-
-      <EditModal
-        item={editItem}
-        categories={['기타', ...categoryNames]}
-        onSave={handleEdit}
-        onClose={() => setEditItem(null)}
+      <EditModal item={editItem} categories={['기타', ...categoryNames]} onSave={handleEdit} onClose={() => setEditItem(null)}
         onPriceHistory={editItem ? () => { setEditItem(null); setPriceHistoryItem({ id: editItem.id, title: editItem.title }) } : undefined}
       />
-
-      <PriceHistoryModal
-        linkId={priceHistoryItem?.id ?? null}
-        linkTitle={priceHistoryItem?.title ?? ''}
-        onClose={() => setPriceHistoryItem(null)}
-      />
-
+      <PriceHistoryModal linkId={priceHistoryItem?.id ?? null} linkTitle={priceHistoryItem?.title ?? ''} onClose={() => setPriceHistoryItem(null)} />
       {showImportExport && (
-        <ImportExportModal
-          onClose={() => setShowImportExport(false)}
-          onImportDone={() => fetchPage(1, filter, categoryFilter)}
-        />
+        <ImportExportModal onClose={() => setShowImportExport(false)} onImportDone={() => fetchPage(1, filter, categoryFilter)} />
       )}
     </div>
   )

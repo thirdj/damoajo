@@ -1,52 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import sql from '@/lib/db'
+import { requireUser } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
   try {
+    const user = await requireUser()
     const body = await req.json()
     const links = body.links || []
     const categories = body.categories || []
 
-    // 카테고리 가져오기 (중복 제외)
-    let importedCats = 0
+    let importedLinks = 0, importedCats = 0, skipped = 0
+
     for (const cat of categories) {
-      const { error } = await supabase
-        .from('categories')
-        .insert({ user_id: user.id, name: cat.name, color: cat.color || '#3b82f6' })
-      if (!error) importedCats++
+      const result = await sql`
+        INSERT INTO categories (user_id, name, color)
+        VALUES (${user.id}, ${cat.name}, ${cat.color || '#3b82f6'})
+        ON CONFLICT (user_id, name) DO NOTHING
+        RETURNING id
+      `
+      if (result.length > 0) importedCats++
     }
 
-    // 링크 가져오기 (중복 URL 제외)
-    let importedLinks = 0
-    let skipped = 0
     for (const link of links) {
-      const { error } = await supabase
-        .from('links')
-        .insert({
-          user_id: user.id,
-          url: link.url,
-          title: link.title,
-          description: link.description,
-          thumbnail: link.thumbnail,
-          site_name: link.site_name,
-          favicon: link.favicon,
-          price: link.price,
-          category: link.category || '기타',
-          tags: link.tags || [],
-          is_favorite: link.is_favorite || false,
-          status: link.status || 'wish',
-          memo: link.memo,
-        })
-      if (error?.code === '23505') skipped++ // unique violation
-      else if (!error) importedLinks++
+      const result = await sql`
+        INSERT INTO links (user_id, url, title, description, thumbnail, site_name, favicon, price, category, is_favorite, status, memo)
+        VALUES (
+          ${user.id}, ${link.url}, ${link.title}, ${link.description ?? null},
+          ${link.thumbnail ?? null}, ${link.site_name ?? null}, ${link.favicon ?? null},
+          ${link.price ?? null}, ${link.category || '기타'}, ${link.is_favorite || false},
+          ${link.status || 'wish'}, ${link.memo ?? null}
+        )
+        ON CONFLICT (user_id, url) DO NOTHING
+        RETURNING id
+      `
+      if (result.length > 0) importedLinks++
+      else skipped++
     }
 
     return NextResponse.json({ importedLinks, importedCats, skipped })
-  } catch {
+  } catch (e) {
+    if ((e as Error).message === 'Unauthorized') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     return NextResponse.json({ error: '파일 형식이 올바르지 않습니다.' }, { status: 400 })
   }
 }
