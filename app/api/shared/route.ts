@@ -1,35 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import sql from '@/lib/db'
 
 export async function GET(req: NextRequest) {
-  const supabase = await createServerSupabaseClient()
-  const { searchParams } = new URL(req.url)
-  const userId = searchParams.get('shared')
-  const filter = searchParams.get('filter')
-  const category = searchParams.get('category')
+  try {
+    const { searchParams } = new URL(req.url)
+    const userId = searchParams.get('shared')
+    const filter = searchParams.get('filter')
+    const category = searchParams.get('category')
 
-  if (!userId) return NextResponse.json({ error: '잘못된 공유 링크입니다.' }, { status: 400 })
+    if (!userId) return NextResponse.json({ error: '잘못된 공유 링크입니다.' }, { status: 400 })
 
-  // shared= 파라미터는 user_id 앞 8자리 — 전체 user 목록에서 매칭
-  const { data: users } = await supabase
-    .from('links')
-    .select('user_id')
-    .ilike('user_id', `${userId}%`)
-    .limit(1)
+    // user_id 앞 8자리로 매칭
+    const userResult = await sql`
+      SELECT DISTINCT user_id FROM links
+      WHERE user_id LIKE ${userId + '%'}
+      LIMIT 1
+    `
+    if (userResult.length === 0) return NextResponse.json({ error: '공유 링크를 찾을 수 없습니다.' }, { status: 404 })
 
-  const fullUserId = users?.[0]?.user_id
-  if (!fullUserId) return NextResponse.json({ error: '공유 링크를 찾을 수 없습니다.' }, { status: 404 })
+    const fullUserId = userResult[0].user_id
 
-  let query = supabase
-    .from('links')
-    .select('*')
-    .eq('user_id', fullUserId)
-    .order('created_at', { ascending: false })
+    let items
+    if (filter && filter !== 'all') {
+      if (category && category !== '전체') {
+        items = await sql`SELECT * FROM links WHERE user_id = ${fullUserId} AND status = ${filter} AND category = ${category} ORDER BY created_at DESC`
+      } else {
+        items = await sql`SELECT * FROM links WHERE user_id = ${fullUserId} AND status = ${filter} ORDER BY created_at DESC`
+      }
+    } else if (category && category !== '전체') {
+      items = await sql`SELECT * FROM links WHERE user_id = ${fullUserId} AND category = ${category} ORDER BY created_at DESC`
+    } else {
+      items = await sql`SELECT * FROM links WHERE user_id = ${fullUserId} ORDER BY created_at DESC`
+    }
 
-  if (filter && filter !== 'all') query = query.eq('status', filter)
-  if (category && category !== '전체') query = query.eq('category', category)
-
-  const { data, error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data)
+    return NextResponse.json(items)
+  } catch (e) {
+    console.error('shared error:', e)
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
+  }
 }

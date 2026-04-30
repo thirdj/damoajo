@@ -12,7 +12,7 @@ export const viewport: Viewport = {
 }
 
 export const metadata: Metadata = {
-  title: 'Damoajo - 나만의 링크 보관함',
+  title: 'Damoajo - 링크 보관함',
   description: '링크를 한 곳에 모아두는 나만의 즐겨찾기',
   manifest: '/manifest.json',
   appleWebApp: {
@@ -26,6 +26,14 @@ export const metadata: Metadata = {
   },
 }
 
+function LoadingSpinner() {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+}
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ko">
@@ -37,14 +45,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="manifest" href="/manifest.json" />
       </head>
       <body>
-        <Suspense fallback={
-          <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-            <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-          </div>
-        }>
+        <Suspense fallback={<LoadingSpinner />}>
           <StackProvider app={stackServerApp}>
             <StackTheme>
-              {children}
+              <Suspense fallback={<LoadingSpinner />}>
+                {children}
+              </Suspense>
             </StackTheme>
           </StackProvider>
         </Suspense>
