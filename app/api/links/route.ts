@@ -2,50 +2,19 @@ import { NextRequest, NextResponse } from 'next/server'
 import sql from '@/lib/db'
 import { requireUser } from '@/lib/auth'
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
     const user = await requireUser()
-    const { searchParams } = new URL(req.url)
-    const filter = searchParams.get('filter') || 'all'
-    const category = searchParams.get('category')
-    const page = parseInt(searchParams.get('page') || '1')
-    const limit = parseInt(searchParams.get('limit') || '30')
-    const offset = (page - 1) * limit
 
-    let items, countResult
+    const items = await sql`
+      SELECT id, url, title, thumbnail, favicon, site_name, price, last_price,
+             price_updated_at, category, is_favorite, memo, created_at, updated_at
+      FROM links
+      WHERE user_id = ${user.id}
+      ORDER BY is_favorite DESC, created_at DESC
+    `
 
-    if (filter === 'favorite') {
-      ;[items, countResult] = await Promise.all([
-        sql`SELECT id, url, title, thumbnail, favicon, site_name, price, last_price, price_updated_at, category, is_favorite, memo, created_at, updated_at
-            FROM links WHERE user_id = ${user.id} AND is_favorite = true
-            ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
-        sql`SELECT COUNT(*)::int as total FROM links WHERE user_id = ${user.id} AND is_favorite = true`,
-      ])
-    } else if (filter === 'no_price') {
-      ;[items, countResult] = await Promise.all([
-        sql`SELECT id, url, title, thumbnail, favicon, site_name, price, last_price, price_updated_at, category, is_favorite, memo, created_at, updated_at
-            FROM links WHERE user_id = ${user.id} AND price IS NULL
-            ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
-        sql`SELECT COUNT(*)::int as total FROM links WHERE user_id = ${user.id} AND price IS NULL`,
-      ])
-    } else if (category && category !== '전체') {
-      ;[items, countResult] = await Promise.all([
-        sql`SELECT id, url, title, thumbnail, favicon, site_name, price, last_price, price_updated_at, category, is_favorite, memo, created_at, updated_at
-            FROM links WHERE user_id = ${user.id} AND category = ${category}
-            ORDER BY is_favorite DESC, created_at DESC LIMIT ${limit} OFFSET ${offset}`,
-        sql`SELECT COUNT(*)::int as total FROM links WHERE user_id = ${user.id} AND category = ${category}`,
-      ])
-    } else {
-      ;[items, countResult] = await Promise.all([
-        sql`SELECT id, url, title, thumbnail, favicon, site_name, price, last_price, price_updated_at, category, is_favorite, memo, created_at, updated_at
-            FROM links WHERE user_id = ${user.id}
-            ORDER BY is_favorite DESC, created_at DESC LIMIT ${limit} OFFSET ${offset}`,
-        sql`SELECT COUNT(*)::int as total FROM links WHERE user_id = ${user.id}`,
-      ])
-    }
-
-    const total = countResult[0].total
-    return NextResponse.json({ items, total, page, hasMore: (offset + limit) < total })
+    return NextResponse.json(items)
   } catch (e) {
     if ((e as Error).message === 'Unauthorized') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     console.error('GET links error:', e)
