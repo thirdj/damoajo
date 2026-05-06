@@ -30,7 +30,7 @@ function SharedContent() {
         <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Package size={20} className="text-blue-600" />
-            <span className="font-semibold text-gray-900">MyLinkBox</span>
+            <span className="font-semibold text-gray-900">Damoajo</span>
             <span className="text-xs text-gray-400 ml-1">공유된 위시리스트</span>
           </div>
           <a href="/auth" className="text-xs text-blue-600 hover:underline">나도 만들기 →</a>

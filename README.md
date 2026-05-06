@@ -1,4 +1,4 @@
-# MyLinkBox 🛍
+# Damoajo 🛍
 
 네이버 스마트스토어, 무신사, 쿠팡 등 쇼핑몰 링크를 한 곳에 모아두는 나만의 위시리스트 앱.
 
@@ -28,7 +28,7 @@
 
 ```bash
 git clone <your-repo-url>
-cd mylinkbox
+cd damoajo
 npm install
 ```
 
@@ -102,7 +102,7 @@ Redirect URLs: https://yourdomain.com/auth/callback
 ## 프로젝트 구조
 
 ```
-mylinkbox/
+damoajo/
 ├── app/
 │   ├── api/
 │   │   ├── og-parse/route.ts     # OG 태그 파싱 API

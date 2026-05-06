@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "MyLinkBox",
+  "name": "damoajo",
   "version": "1.0.0",
-  "description": "현재 페이지를 MyLinkBox에 바로 저장하세요",
+  "description": "현재 페이지를 damoajo 바로 저장하세요",
   "permissions": [
     "activeTab",
     "scripting",
