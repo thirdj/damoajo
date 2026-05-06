@@ -20,7 +20,9 @@ export default function EditModal({ item, categories, onSave, onClose, onPriceHi
   useEffect(() => {
     if (item) {
       setTitle(item.title)
-      setPrice(item.price || '')
+      // 숫자만 추출해서 세팅
+      const numPrice = item.price ? item.price.replace(/[^0-9]/g, '') : ''
+      setPrice(numPrice)
       setCategory(item.category)
       setMemo(item.memo || '')
     }
@@ -29,7 +31,15 @@ export default function EditModal({ item, categories, onSave, onClose, onPriceHi
   if (!item) return null
 
   const handleSave = () => {
-    onSave(item.id, { title, price: price || null, category, memo: memo || null })
+    if (!title.trim()) return
+    // 가격은 숫자로 저장
+    const priceVal = price ? price.replace(/[^0-9]/g, '') : null
+    onSave(item.id, {
+      title: title.trim(),
+      price: priceVal || null,
+      category,
+      memo: memo.trim() || null,
+    })
     onClose()
   }
 
@@ -44,7 +54,9 @@ export default function EditModal({ item, categories, onSave, onClose, onPriceHi
 
         <div className="px-5 py-4 space-y-4">
           <div>
-            <label className="text-xs font-medium text-gray-500 block mb-1.5">제목</label>
+            <label className="text-xs font-medium text-gray-500 block mb-1.5">
+              제목 <span className="text-red-400">*</span>
+            </label>
             <input value={title} onChange={e => setTitle(e.target.value)}
               className="w-full h-11 px-3 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400" />
           </div>
@@ -58,8 +70,13 @@ export default function EditModal({ item, categories, onSave, onClose, onPriceHi
                 </button>
               )}
             </div>
-            <input value={price} onChange={e => setPrice(e.target.value)} placeholder="예: 39000"
-              className="w-full h-11 px-3 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400" />
+            <input
+              value={price}
+              onChange={e => setPrice(e.target.value.replace(/[^0-9]/g, ''))}
+              placeholder="숫자만 입력 (원)"
+              className="w-full h-11 px-3 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+            />
+            {price && <p className="text-xs text-blue-600 mt-1">₩{parseInt(price).toLocaleString()}</p>}
             {item.last_price && item.last_price !== item.price && (
               <p className="text-xs text-gray-400 mt-1">이전: {item.last_price}</p>
             )}
@@ -82,7 +99,10 @@ export default function EditModal({ item, categories, onSave, onClose, onPriceHi
 
         <div className="px-5 pb-6 flex gap-2">
           <button onClick={onClose} className="h-12 px-5 text-sm border border-gray-200 rounded-xl hover:bg-gray-50 text-gray-600">취소</button>
-          <button onClick={handleSave} className="flex-1 h-12 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl">저장</button>
+          <button onClick={handleSave} disabled={!title.trim()}
+            className="flex-1 h-12 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl disabled:opacity-50">
+            저장
+          </button>
         </div>
       </div>
     </div>

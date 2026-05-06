@@ -10,6 +10,8 @@ import PriceHistoryModal from '@/components/PriceHistoryModal'
 import SearchBar from '@/components/SearchBar'
 import ImportExportModal from '@/components/ImportExportModal'
 import PriceAlertBell from '@/components/PriceAlertBell'
+import ToastContainer, { showToast } from '@/components/Toast'
+import ConfirmModal from '@/components/ConfirmModal'
 import { Plus, X, MoreVertical, LogOut } from 'lucide-react'
 
 function parsePrice(p: string | null): number {
@@ -56,20 +58,32 @@ export default function DashboardPage() {
   const [showImportExport, setShowImportExport] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [showAddLink, setShowAddLink] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<LinkItem | null>(null)
 
-  // 전체 데이터 한번에 로딩
   const fetchAll = useCallback(async () => {
     setLoading(true)
-    const [linksRes, catsRes] = await Promise.all([
-      fetch('/api/links'),
-      fetch('/api/categories'),
-    ])
-    if (linksRes.ok) setAllItems(await linksRes.json())
-    if (catsRes.ok) {
-      const data = await catsRes.json()
-      if (data.length > 0) setCategories(data)
+    try {
+      const [linksRes, catsRes] = await Promise.all([
+        fetch('/api/links'),
+        fetch('/api/categories'),
+      ])
+      if (linksRes.ok) {
+        setAllItems(await linksRes.json())
+      } else if (linksRes.status === 401) {
+        window.location.href = '/handler/sign-in'
+        return
+      } else {
+        showToast('데이터를 불러오지 못했습니다.', 'error')
+      }
+      if (catsRes.ok) {
+        const data = await catsRes.json()
+        if (data.length > 0) setCategories(data)
+      }
+    } catch {
+      showToast('네트워크 오류가 발생했습니다.', 'error')
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }, [])
 
   useEffect(() => {
@@ -78,59 +92,98 @@ export default function DashboardPage() {
   }, [user, fetchAll])
 
   const handleAdd = async (linkData: Omit<LinkItem, 'id' | 'user_id' | 'created_at' | 'updated_at'>) => {
-    const res = await fetch('/api/links', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(linkData),
-    })
-    if (res.status === 409) return { duplicate: true }
-    if (res.ok) {
+    try {
+      const res = await fetch('/api/links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(linkData),
+      })
+      if (res.status === 409) return { duplicate: true }
+      if (res.status === 401) { window.location.href = '/handler/sign-in'; return {} }
+      if (!res.ok) { showToast('저장에 실패했습니다.', 'error'); return {} }
       const newItem = await res.json()
       setAllItems(prev => [newItem, ...prev])
+      showToast('링크가 저장되었습니다.')
+    } catch {
+      showToast('네트워크 오류가 발생했습니다.', 'error')
     }
     return {}
   }
 
   const handleEdit = async (id: string, updates: Partial<LinkItem>) => {
-    const res = await fetch(`/api/links/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
-    })
-    if (res.ok) {
+    try {
+      const res = await fetch(`/api/links/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      })
+      if (res.status === 401) { window.location.href = '/handler/sign-in'; return }
+      if (!res.ok) { showToast('수정에 실패했습니다.', 'error'); return }
       const updated = await res.json()
       setAllItems(prev => prev.map(i => i.id === id ? updated : i))
+      if (updated.priceChanged) {
+        showToast(`가격 변동: ${updated.oldPrice || '미입력'} → ${updates.price || '미입력'}`, 'warning')
+      }
+    } catch {
+      showToast('네트워크 오류가 발생했습니다.', 'error')
     }
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('삭제하시겠습니까?')) return
-    const res = await fetch(`/api/links/${id}`, { method: 'DELETE' })
-    if (res.ok) setAllItems(prev => prev.filter(i => i.id !== id))
+    try {
+      const res = await fetch(`/api/links/${id}`, { method: 'DELETE' })
+      if (res.status === 401) { window.location.href = '/handler/sign-in'; return }
+      if (!res.ok) { showToast('삭제에 실패했습니다.', 'error'); return }
+      setAllItems(prev => prev.filter(i => i.id !== id))
+      showToast('삭제되었습니다.')
+    } catch {
+      showToast('네트워크 오류가 발생했습니다.', 'error')
+    }
   }
 
   const handleToggleFavorite = (id: string, val: boolean) => handleEdit(id, { is_favorite: val })
 
   const handleAddCategory = async () => {
     const name = prompt('새 카테고리 이름:')
-    if (!name || categories.find(c => c.name === name)) return
-    const res = await fetch('/api/categories', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    })
-    if (res.ok) {
+    if (!name?.trim()) return
+    if (categories.find(c => c.name === name)) {
+      showToast('이미 존재하는 카테고리입니다.', 'warning'); return
+    }
+    try {
+      const res = await fetch('/api/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim() }),
+      })
+      if (!res.ok) { showToast('카테고리 추가에 실패했습니다.', 'error'); return }
       const newCat = await res.json()
       setCategories(prev => [...prev, newCat])
+      showToast(`"${name}" 카테고리가 추가되었습니다.`)
+    } catch {
+      showToast('네트워크 오류가 발생했습니다.', 'error')
     }
   }
 
   const handleDeleteCategory = async (cat: Category) => {
-    if (!confirm(`"${cat.name}" 삭제?`)) return
-    const res = await fetch(`/api/categories/${cat.id}`, { method: 'DELETE' })
-    if (res.ok) {
+    const linkedCount = allItems.filter(i => i.category === cat.name).length
+    const msg = linkedCount > 0
+      ? `"${cat.name}" 카테고리를 삭제할까요? 해당 카테고리의 링크 ${linkedCount}개는 "기타"로 변경됩니다.`
+      : `"${cat.name}" 카테고리를 삭제할까요?`
+    if (!confirm(msg)) return
+    try {
+      const res = await fetch(`/api/categories/${cat.id}`, { method: 'DELETE' })
+      if (!res.ok) { showToast('카테고리 삭제에 실패했습니다.', 'error'); return }
       setCategories(prev => prev.filter(c => c.id !== cat.id))
       if (categoryFilter === cat.name) setCategoryFilter('전체')
+      // 해당 카테고리 링크 → 기타로 변경 (클라이언트 반영)
+      if (linkedCount > 0) {
+        setAllItems(prev => prev.map(i => i.category === cat.name ? { ...i, category: '기타' } : i))
+        showToast(`"${cat.name}" 삭제 완료. ${linkedCount}개 링크가 "기타"로 변경되었습니다.`, 'warning')
+      } else {
+        showToast(`"${cat.name}" 카테고리가 삭제되었습니다.`)
+      }
+    } catch {
+      showToast('네트워크 오류가 발생했습니다.', 'error')
     }
   }
 
@@ -141,11 +194,8 @@ export default function DashboardPage() {
 
   const categoryNames = categories.map(c => c.name)
 
-  // 클라이언트 필터링 + 정렬 (API 호출 없이 즉시 반응)
   const displayed = useMemo(() => {
     let list = [...allItems]
-
-    // 검색
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter(i =>
@@ -154,15 +204,9 @@ export default function DashboardPage() {
         i.category.toLowerCase().includes(q)
       )
     }
-
-    // 필터
     if (filter === 'favorite') list = list.filter(i => i.is_favorite)
     else if (filter === 'no_price') list = list.filter(i => !i.price)
-
-    // 카테고리
     if (categoryFilter !== '전체') list = list.filter(i => i.category === categoryFilter)
-
-    // 정렬
     list.sort((a, b) => {
       if (sort === 'newest') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       if (sort === 'oldest') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
@@ -171,7 +215,6 @@ export default function DashboardPage() {
       if (sort === 'site') return (a.site_name || '').localeCompare(b.site_name || '')
       return 0
     })
-
     return list
   }, [allItems, search, filter, categoryFilter, sort])
 
@@ -189,6 +232,16 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-6">
+      <ToastContainer />
+
+      {/* 삭제 확인 모달 */}
+      <ConfirmModal
+        open={!!deleteTarget}
+        message={deleteTarget ? `"${deleteTarget.title.slice(0, 30)}${deleteTarget.title.length > 30 ? '...' : ''}"을 삭제할까요?` : ''}
+        onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
+
       {/* 헤더 */}
       <header className="bg-white border-b border-gray-100 sticky top-0 z-40">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
@@ -237,8 +290,7 @@ export default function DashboardPage() {
         <div className="flex items-center gap-1.5 mb-3 overflow-x-auto pb-1">
           {['전체', ...categoryNames].map(cat => (
             <div key={cat} className="relative group flex-shrink-0">
-              <button
-                onClick={() => setCategoryFilter(cat)}
+              <button onClick={() => setCategoryFilter(cat)}
                 className={`text-xs h-7 px-3 rounded-full border transition-all whitespace-nowrap ${
                   categoryFilter === cat ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-500 border-gray-200'
                 }`}>
@@ -262,13 +314,12 @@ export default function DashboardPage() {
         <Toolbar
           view={view} filter={filter} sort={sort}
           onViewChange={setView}
-          onFilterChange={(f) => setFilter(f)}
+          onFilterChange={f => setFilter(f)}
           onSortChange={setSort}
           totalCount={displayed.length}
           totalBudget={totalBudget}
         />
 
-        {/* 콘텐츠 */}
         {loading ? (
           <div className={gridClass}>
             {Array.from({ length: 6 }).map((_, i) => <CardSkeleton key={i} view={view} />)}
@@ -280,34 +331,29 @@ export default function DashboardPage() {
             <p className="text-xs mt-1">{search ? '다른 키워드로 검색해보세요.' : '+ 버튼으로 저장해보세요.'}</p>
           </div>
         ) : (
-          <div className={gridClass}>
-            {displayed.map(item => (
-              <LinkCard
-                key={item.id}
-                item={item}
-                view={view}
-                onEdit={setEditItem}
-                onDelete={handleDelete}
-                onPriceHistory={() => setPriceHistoryItem({ id: item.id, title: item.title })}
-                onToggleFavorite={handleToggleFavorite}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* 하단 카운트 */}
-        {!loading && displayed.length > 0 && (
-          <p className="text-center text-xs text-gray-400 mt-6">총 {displayed.length}개</p>
+          <>
+            <div className={gridClass}>
+              {displayed.map(item => (
+                <LinkCard
+                  key={item.id}
+                  item={item}
+                  view={view}
+                  onEdit={setEditItem}
+                  onDelete={id => setDeleteTarget(allItems.find(i => i.id === id) || null)}
+                  onPriceHistory={() => setPriceHistoryItem({ id: item.id, title: item.title })}
+                  onToggleFavorite={handleToggleFavorite}
+                />
+              ))}
+            </div>
+            {displayed.length > 0 && (
+              <p className="text-center text-xs text-gray-400 mt-6">총 {displayed.length}개</p>
+            )}
+          </>
         )}
       </main>
 
       {showAddLink && (
-        <AddLinkBar
-          categories={categoryNames}
-          onAdd={handleAdd}
-          defaultOpen={true}
-          onClose={() => setShowAddLink(false)}
-        />
+        <AddLinkBar categories={categoryNames} onAdd={handleAdd} defaultOpen={true} onClose={() => setShowAddLink(false)} />
       )}
 
       <EditModal

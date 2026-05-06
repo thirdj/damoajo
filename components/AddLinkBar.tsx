@@ -1,8 +1,9 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import { X, Loader2, Link2, AlertCircle, Upload, ImageIcon } from 'lucide-react'
 import Image from 'next/image'
 import { LinkItem, OGData } from '@/types'
+import { showToast } from '@/components/Toast'
 
 interface Props {
   categories: string[]
@@ -57,8 +58,14 @@ export default function AddLinkBar({ categories, onAdd, defaultOpen = false, onC
       const data: OGData = await res.json()
       setOg(data)
       setTitle(data.title || '')
-      setThumbnailPreview(data.thumbnail || null)
-      setThumbnailUrl(data.thumbnail || null)
+      // base64 썸네일은 미리보기만, 저장 안함
+      if (data.thumbnail && !data.thumbnail.startsWith('data:')) {
+        setThumbnailPreview(data.thumbnail)
+        setThumbnailUrl(data.thumbnail)
+      } else {
+        setThumbnailPreview(null)
+        setThumbnailUrl(null)
+      }
       setStep('confirm')
     } catch {
       setFetchError('링크 정보를 가져오지 못했어요.')
@@ -86,13 +93,16 @@ export default function AddLinkBar({ categories, onAdd, defaultOpen = false, onC
     } catch { /* not URL */ }
   }
 
+  // 이미지 업로드 - Vercel Blob URL로 업로드 권장
+  // 현재는 외부 URL만 허용 (base64 저장 차단)
   const handleImageFile = (file: File) => {
     if (!file.type.startsWith('image/')) return
+    // base64 대신 미리보기만 보여주고 사용자에게 URL 입력 유도
     const reader = new FileReader()
-    reader.onload = e => {
-      const b64 = e.target?.result as string
-      setThumbnailPreview(b64)
-      setThumbnailUrl(b64)
+    reader.onload = (e) => {
+      setThumbnailPreview(e.target?.result as string) // 미리보기용
+      setThumbnailUrl(null) // 실제 저장은 안함
+      showToast('이미지 미리보기만 가능해요. 이미지 URL을 직접 입력하면 저장됩니다.', 'warning')
     }
     reader.readAsDataURL(file)
   }
@@ -103,18 +113,20 @@ export default function AddLinkBar({ categories, onAdd, defaultOpen = false, onC
     setError('')
     try {
       const result = await onAdd({
-        url: url.trim(), title,
+        url: url.trim(), title: title.trim(),
         description: og?.description ?? null,
-        thumbnail: thumbnailUrl,
+        thumbnail: thumbnailUrl, // base64면 null
         site_name: og?.site_name ?? null,
         favicon: og?.favicon ?? null,
         price: price || null,
         last_price: null, price_updated_at: null,
-        category, is_favorite: false,
-        memo: null,
+        category, is_favorite: false, memo: null,
       })
-      if (result.duplicate) setError('이미 저장된 링크입니다.')
-      else handleClose()
+      if (result.duplicate) {
+        setError('이미 저장된 링크입니다.')
+      } else {
+        handleClose()
+      }
     } catch {
       setError('저장 중 오류가 발생했습니다.')
     } finally {
@@ -126,10 +138,9 @@ export default function AddLinkBar({ categories, onAdd, defaultOpen = false, onC
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={handleClose}>
-      <div
-        className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] overflow-y-auto"
-        onClick={e => e.stopPropagation()}
-      >
+      <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}>
+
         {/* 헤더 */}
         <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-gray-100 sticky top-0 bg-white z-10">
           <div className="flex items-center gap-2">
@@ -152,16 +163,18 @@ export default function AddLinkBar({ categories, onAdd, defaultOpen = false, onC
             <div className="relative">
               <Link2 size={14} className="absolute left-3 top-3.5 text-gray-400" />
               <input
-                autoFocus
-                type="url"
-                value={url}
+                autoFocus type="url" value={url}
                 onChange={e => handleUrlChange(e.target.value)}
                 onPaste={handlePaste}
                 placeholder="링크를 붙여넣으면 자동으로 가져와요"
                 className="w-full h-12 pl-9 pr-3 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
               />
             </div>
-            {fetchError && <div className="flex items-center gap-1.5 mt-2 text-xs text-red-600"><AlertCircle size={12} />{fetchError}</div>}
+            {fetchError && (
+              <div className="flex items-center gap-1.5 mt-2 text-xs text-red-600">
+                <AlertCircle size={12} />{fetchError}
+              </div>
+            )}
             {fetching && (
               <div className="mt-8 flex flex-col items-center gap-3 py-4">
                 <Loader2 size={32} className="animate-spin text-blue-500" />
@@ -169,7 +182,8 @@ export default function AddLinkBar({ categories, onAdd, defaultOpen = false, onC
               </div>
             )}
             {!fetching && url && (
-              <button onClick={() => fetchOG(url)} className="mt-3 w-full h-11 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-xl flex items-center justify-center gap-2">
+              <button onClick={() => fetchOG(url)}
+                className="mt-3 w-full h-11 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-xl flex items-center justify-center gap-2">
                 수동으로 가져오기
               </button>
             )}
@@ -184,7 +198,7 @@ export default function AddLinkBar({ categories, onAdd, defaultOpen = false, onC
               <div className="flex items-center justify-between mb-2">
                 <label className="text-xs font-medium text-gray-500">썸네일</label>
                 <button onClick={() => fileRef.current?.click()} className="text-xs text-blue-600 flex items-center gap-1">
-                  <Upload size={11} /> 직접 업로드
+                  <Upload size={11} /> 파일 선택
                 </button>
               </div>
               <input ref={fileRef} type="file" accept="image/*" className="hidden"
@@ -206,27 +220,44 @@ export default function AddLinkBar({ categories, onAdd, defaultOpen = false, onC
                 ) : (
                   <div className="flex flex-col items-center gap-2 text-gray-400">
                     <ImageIcon size={28} className="text-gray-300" />
-                    <p className="text-xs text-center">이미지 없음 · <span className="text-blue-500">클릭</span>하여 추가</p>
+                    <p className="text-xs text-center">이미지 없음</p>
                   </div>
                 )}
               </div>
-              <input type="url" placeholder="또는 이미지 URL 직접 입력..."
+              {/* 이미지 URL 직접 입력 */}
+              <input type="url" placeholder="또는 이미지 URL 직접 입력 (https://...)"
                 value={thumbnailUrl?.startsWith('data:') ? '' : (thumbnailUrl || '')}
-                onChange={e => { setThumbnailUrl(e.target.value || null); setThumbnailPreview(e.target.value || null) }}
-                className="mt-2 w-full h-9 px-3 text-xs bg-gray-50 border border-gray-200 rounded-xl focus:outline-none" />
+                onChange={e => {
+                  const v = e.target.value.trim()
+                  if (v && !v.startsWith('http')) return
+                  setThumbnailUrl(v || null)
+                  setThumbnailPreview(v || null)
+                }}
+                className="mt-2 w-full h-9 px-3 text-xs bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
             </div>
 
+            {/* 제목 */}
             <div>
-              <label className="text-xs font-medium text-gray-500 block mb-1.5">제목</label>
+              <label className="text-xs font-medium text-gray-500 block mb-1.5">제목 <span className="text-red-400">*</span></label>
               <input value={title} onChange={e => setTitle(e.target.value)}
                 className="w-full h-11 px-3 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
             </div>
 
+            {/* 가격 + 카테고리 */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1.5">가격 (선택)</label>
-                <input value={price} onChange={e => setPrice(e.target.value)} placeholder="예: 39000"
-                  className="w-full h-11 px-3 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none" />
+                <input
+                  value={price}
+                  onChange={e => {
+                    // 숫자만 허용
+                    const num = e.target.value.replace(/[^0-9]/g, '')
+                    setPrice(num)
+                  }}
+                  placeholder="숫자만 입력 (원)"
+                  className="w-full h-11 px-3 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                />
+                {price && <p className="text-xs text-blue-600 mt-1">₩{parseInt(price).toLocaleString()}</p>}
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1.5">카테고리</label>
@@ -237,6 +268,7 @@ export default function AddLinkBar({ categories, onAdd, defaultOpen = false, onC
               </div>
             </div>
 
+            {/* 출처 */}
             <div className="flex items-center gap-1.5 text-xs text-gray-400">
               {og.favicon && <Image src={og.favicon} alt="" width={12} height={12} unoptimized className="rounded-sm" />}
               <span>{og.site_name}</span>
@@ -244,7 +276,11 @@ export default function AddLinkBar({ categories, onAdd, defaultOpen = false, onC
               <span className="truncate text-[11px]">{url}</span>
             </div>
 
-            {error && <div className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg"><AlertCircle size={12} />{error}</div>}
+            {error && (
+              <div className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">
+                <AlertCircle size={12} />{error}
+              </div>
+            )}
 
             <button onClick={handleSave} disabled={saving}
               className="w-full h-12 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 disabled:opacity-60">

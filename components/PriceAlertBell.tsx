@@ -1,7 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { Bell, X, TrendingDown, TrendingUp, Check, Trash2 } from 'lucide-react'
+import { Bell, X, TrendingDown, TrendingUp, Trash2 } from 'lucide-react'
 import { PriceAlert } from '@/types'
+import { showToast } from '@/components/Toast'
 
 function timeAgo(dateStr: string) {
   const diff = Date.now() - new Date(dateStr).getTime()
@@ -26,9 +27,14 @@ export default function PriceAlertBell() {
 
   const fetchAlerts = async () => {
     setLoading(true)
-    const res = await fetch('/api/price-alerts')
-    if (res.ok) setAlerts(await res.json())
-    setLoading(false)
+    try {
+      const res = await fetch('/api/price-alerts')
+      if (res.ok) setAlerts(await res.json())
+    } catch {
+      // 조용히 실패
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { fetchAlerts() }, [])
@@ -42,16 +48,40 @@ export default function PriceAlertBell() {
     setAlerts(prev => prev.map(a => a.id === id ? { ...a, is_read: true } : a))
   }
 
+  const markAllRead = async () => {
+    const unreadIds = alerts.filter(a => !a.is_read).map(a => a.id)
+    await Promise.all(unreadIds.map(id =>
+      fetch('/api/price-alerts', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+    ))
+    setAlerts(prev => prev.map(a => ({ ...a, is_read: true })))
+  }
+
   const clearAll = async () => {
-    await fetch('/api/price-alerts', { method: 'DELETE' })
-    setAlerts([])
-    setOpen(false)
+    try {
+      await fetch('/api/price-alerts', { method: 'DELETE' })
+      setAlerts([])
+      setOpen(false)
+      showToast('알림을 모두 삭제했습니다.')
+    } catch {
+      showToast('삭제에 실패했습니다.', 'error')
+    }
   }
 
   return (
     <div className="relative">
       <button
-        onClick={() => { setOpen(v => !v); if (!open) fetchAlerts() }}
+        onClick={() => {
+          setOpen(v => !v)
+          if (!open) {
+            fetchAlerts()
+            // 열 때 모두 읽음 처리
+            if (unread > 0) markAllRead()
+          }
+        }}
         className="relative p-2 rounded-xl hover:bg-gray-100 text-gray-500 transition-colors"
       >
         <Bell size={18} />
@@ -71,9 +101,6 @@ export default function PriceAlertBell() {
               <div className="flex items-center gap-2">
                 <Bell size={14} className="text-gray-500" />
                 <span className="text-sm font-semibold text-gray-900">가격 변동 알림</span>
-                {unread > 0 && (
-                  <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-medium">{unread}개 새 알림</span>
-                )}
               </div>
               <div className="flex items-center gap-1">
                 {alerts.length > 0 && (
@@ -101,26 +128,22 @@ export default function PriceAlertBell() {
                 alerts.map(alert => {
                   const oldP = parsePrice(alert.old_price)
                   const newP = parsePrice(alert.new_price)
-                  const isDown = newP < oldP
+                  const isDown = newP < oldP && oldP > 0
                   return (
-                    <div
-                      key={alert.id}
-                      onClick={() => markRead(alert.id)}
-                      className={`flex items-start gap-3 px-4 py-3 border-b border-gray-50 cursor-pointer hover:bg-gray-50 transition-colors ${!alert.is_read ? 'bg-blue-50/40' : ''}`}
-                    >
+                    <div key={alert.id} onClick={() => markRead(alert.id)}
+                      className={`flex items-start gap-3 px-4 py-3 border-b border-gray-50 cursor-pointer hover:bg-gray-50 transition-colors ${!alert.is_read ? 'bg-blue-50/40' : ''}`}>
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${isDown ? 'bg-green-100' : 'bg-red-100'}`}>
                         {isDown
                           ? <TrendingDown size={14} className="text-green-600" />
-                          : <TrendingUp size={14} className="text-red-500" />
-                        }
+                          : <TrendingUp size={14} className="text-red-500" />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-semibold text-gray-800 truncate">{alert.link_title}</p>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="text-xs text-gray-400 line-through">{alert.old_price || '미입력'}</span>
+                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                          <span className="text-xs text-gray-400 line-through">{alert.old_price ? `₩${parseInt(alert.old_price).toLocaleString()}` : '미입력'}</span>
                           <span className="text-xs text-gray-400">→</span>
                           <span className={`text-xs font-bold ${isDown ? 'text-green-600' : 'text-red-500'}`}>
-                            {alert.new_price || '미입력'}
+                            {alert.new_price ? `₩${parseInt(alert.new_price).toLocaleString()}` : '미입력'}
                           </span>
                           {oldP > 0 && newP > 0 && (
                             <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${isDown ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
@@ -130,9 +153,7 @@ export default function PriceAlertBell() {
                         </div>
                         <p className="text-[10px] text-gray-400 mt-0.5">{timeAgo(alert.created_at)} · 7일 후 자동 삭제</p>
                       </div>
-                      {!alert.is_read && (
-                        <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0 mt-1.5" />
-                      )}
+                      {!alert.is_read && <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0 mt-1.5" />}
                     </div>
                   )
                 })

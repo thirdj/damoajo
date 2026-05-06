@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 function getSiteLabel(hostname: string): string {
   const map: Record<string, string> = {
@@ -53,10 +54,13 @@ async function tryMicrolink(url: string) {
     if (!res.ok) return null
     const data = await res.json()
     if (data.status !== 'success') return null
+    const thumbnail = data.data?.image?.url || data.data?.logo?.url || null
+    // base64 이미지 제외
+    if (thumbnail?.startsWith('data:')) return { ...data.data, thumbnail: null }
     return {
       title: data.data?.title || null,
       description: data.data?.description || null,
-      thumbnail: data.data?.image?.url || data.data?.logo?.url || null,
+      thumbnail,
     }
   } catch { return null }
 }
@@ -65,7 +69,7 @@ async function tryDirectFetch(url: string) {
   const agents = [
     'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
     'Twitterbot/1.0',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36',
   ]
   for (const ua of agents) {
     try {
@@ -79,6 +83,8 @@ async function tryDirectFetch(url: string) {
       if (html.includes('에러페이지') || html.includes('accessDenied') || html.length < 500) continue
       const title = getMeta(html, 'og:title', 'twitter:title')
       const thumbnail = getMeta(html, 'og:image', 'twitter:image')
+      // base64 이미지 제외
+      if (thumbnail?.startsWith('data:')) return { title, description: null, thumbnail: null }
       const description = getMeta(html, 'og:description', 'description')
       if (title || thumbnail) return { title, description, thumbnail }
     } catch { continue }
@@ -89,7 +95,9 @@ async function tryDirectFetch(url: string) {
 export async function POST(req: NextRequest) {
   try {
     const { url } = await req.json()
-    if (!url) return NextResponse.json({ error: 'URL required' }, { status: 400 })
+    if (!url || typeof url !== 'string') {
+      return NextResponse.json({ error: 'URL required' }, { status: 400 })
+    }
 
     let parsedUrl: URL
     try { parsedUrl = new URL(url) } catch {
