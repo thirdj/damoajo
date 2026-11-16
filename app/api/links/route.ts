@@ -4,21 +4,70 @@ import { requireUser } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const user = await requireUser()
-    const items = await sql`
-      SELECT
-        id, url, title,
-        CASE WHEN thumbnail LIKE 'data:%' THEN NULL ELSE thumbnail END as thumbnail,
-        favicon, site_name, price, last_price,
-        price_updated_at, category, is_favorite, memo,
-        created_at, updated_at
-      FROM links
-      WHERE user_id = ${user.id}
-      ORDER BY is_favorite DESC, created_at DESC
-    `
-    return NextResponse.json(items)
+    const { searchParams } = new URL(req.url)
+
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10))
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '40', 10)))
+    const offset = (page - 1) * limit
+
+    const search = (searchParams.get('search') || '').trim()
+    const category = searchParams.get('category') || '전체'
+    const filter = searchParams.get('filter') || 'all'
+    const sort = searchParams.get('sort') || 'newest'
+
+    const searchPattern = `%${search}%`
+
+    const [countResult, items] = await Promise.all([
+      sql`
+        SELECT COUNT(*)::int AS count
+        FROM links
+        WHERE user_id = ${user.id}
+          AND (${search === ''} OR title ILIKE ${searchPattern} OR site_name ILIKE ${searchPattern} OR category ILIKE ${searchPattern})
+          AND (${category === '전체'} OR category = ${category})
+          AND (
+            ${filter === 'all'}
+            OR (${filter === 'favorite'} AND is_favorite = true)
+            OR (${filter === 'no_price'} AND (price IS NULL OR price = ''))
+          )
+      `,
+      sql`
+        SELECT
+          id, url, title, thumbnail,
+          favicon, site_name, price, last_price,
+          price_updated_at, category, is_favorite, memo,
+          created_at, updated_at
+        FROM links
+        WHERE user_id = ${user.id}
+          AND (${search === ''} OR title ILIKE ${searchPattern} OR site_name ILIKE ${searchPattern} OR category ILIKE ${searchPattern})
+          AND (${category === '전체'} OR category = ${category})
+          AND (
+            ${filter === 'all'}
+            OR (${filter === 'favorite'} AND is_favorite = true)
+            OR (${filter === 'no_price'} AND (price IS NULL OR price = ''))
+          )
+        ORDER BY
+          CASE WHEN ${sort} = 'newest' THEN created_at END DESC,
+          CASE WHEN ${sort} = 'oldest' THEN created_at END ASC,
+          CASE WHEN ${sort} = 'price_asc' THEN NULLIF(REGEXP_REPLACE(COALESCE(price, ''), '[^0-9]', '', 'g'), '')::bigint END ASC NULLS LAST,
+          CASE WHEN ${sort} = 'price_desc' THEN NULLIF(REGEXP_REPLACE(COALESCE(price, ''), '[^0-9]', '', 'g'), '')::bigint END DESC NULLS LAST,
+          CASE WHEN ${sort} = 'site' THEN site_name END ASC NULLS LAST,
+          created_at DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `,
+    ])
+
+    const totalCount = countResult[0]?.count ?? 0
+    const totalPages = Math.max(1, Math.ceil(totalCount / limit))
+
+    return NextResponse.json({
+      items,
+      totalCount,
+      totalPages,
+      page,
+    })
   } catch (e) {
     if ((e as Error).message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -37,7 +86,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'url과 title은 필수입니다.' }, { status: 400 })
     }
 
-    // URL 유효성 검사
     try { new URL(body.url) } catch {
       return NextResponse.json({ error: '올바른 URL 형식이 아닙니다.' }, { status: 400 })
     }
@@ -49,7 +97,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'DUPLICATE', existing: existing[0] }, { status: 409 })
     }
 
-    // base64 이미지는 저장 거부
     const thumbnail = body.thumbnail?.startsWith('data:') ? null : (body.thumbnail ?? null)
 
     const [item] = await sql`

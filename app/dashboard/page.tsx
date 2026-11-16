@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useUser } from '@stackframe/stack'
 import { LinkItem, ViewMode, SortMode, FilterMode, Category } from '@/types'
 import AddLinkBar from '@/components/AddLinkBar'
@@ -9,10 +9,9 @@ import EditModal from '@/components/EditModal'
 import PriceHistoryModal from '@/components/PriceHistoryModal'
 import SearchBar from '@/components/SearchBar'
 import ImportExportModal from '@/components/ImportExportModal'
-import PriceAlertBell from '@/components/PriceAlertBell'
 import ToastContainer, { showToast } from '@/components/Toast'
 import ConfirmModal from '@/components/ConfirmModal'
-import { Plus, X, MoreVertical, LogOut } from 'lucide-react'
+import { Plus, X, MoreVertical, LogOut, ChevronLeft, ChevronRight } from 'lucide-react'
 
 function parsePrice(p: string | null): number {
   if (!p) return 0
@@ -43,9 +42,15 @@ function CardSkeleton({ view }: { view: ViewMode }) {
   )
 }
 
+const PAGE_SIZE = 60
+
 export default function DashboardPage() {
   const user = useUser({ or: 'redirect' })
-  const [allItems, setAllItems] = useState<LinkItem[]>([])
+  const [items, setItems] = useState<LinkItem[]>([])
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+
   const [view, setView] = useState<ViewMode>('grid2')
   const [filter, setFilter] = useState<FilterMode>('all')
   const [sort, setSort] = useState<SortMode>('newest')
@@ -55,41 +60,70 @@ export default function DashboardPage() {
   const [priceHistoryItem, setPriceHistoryItem] = useState<{ id: string; title: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [showImportExport, setShowImportExport] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [showAddLink, setShowAddLink] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<LinkItem | null>(null)
 
-  const fetchAll = useCallback(async () => {
+  const catsFetchedRef = useRef(false)
+
+  // 검색어 입력 시 300ms 디바운스 후 1페이지로 이동
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search)
+      setPage(1)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  // 카테고리 1회 조회
+  useEffect(() => {
+    if (catsFetchedRef.current) return
+    catsFetchedRef.current = true
+    fetch('/api/categories')
+      .then(res => (res.ok ? res.json() : []))
+      .then(data => {
+        if (data.length > 0) setCategories(data)
+      })
+      .catch(() => {})
+  }, [])
+
+  // 40개씩 링크 조회
+  const fetchLinks = useCallback(async () => {
     setLoading(true)
     try {
-      const [linksRes, catsRes] = await Promise.all([
-        fetch('/api/links'),
-        fetch('/api/categories'),
-      ])
-      if (linksRes.ok) {
-        setAllItems(await linksRes.json())
-      } else if (linksRes.status === 401) {
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(PAGE_SIZE),
+        search: debouncedSearch,
+        filter,
+        category: categoryFilter,
+        sort,
+      })
+      const res = await fetch(`/api/links?${params.toString()}`)
+      if (res.status === 401) {
         window.location.href = '/handler/sign-in'
         return
-      } else {
+      }
+      if (!res.ok) {
         showToast('데이터를 불러오지 못했습니다.', 'error')
+        return
       }
-      if (catsRes.ok) {
-        const data = await catsRes.json()
-        if (data.length > 0) setCategories(data)
-      }
+      const data = await res.json()
+      setItems(data.items ?? [])
+      setTotalPages(data.totalPages ?? 1)
+      setTotalCount(data.totalCount ?? 0)
     } catch {
       showToast('네트워크 오류가 발생했습니다.', 'error')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [page, debouncedSearch, filter, categoryFilter, sort])
 
   useEffect(() => {
-    if (!user) return
-    fetchAll()
-  }, [user, fetchAll])
+    fetchLinks()
+  }, [fetchLinks])
 
   const handleAdd = async (linkData: Omit<LinkItem, 'id' | 'user_id' | 'created_at' | 'updated_at'>) => {
     try {
@@ -102,7 +136,12 @@ export default function DashboardPage() {
       if (res.status === 401) { window.location.href = '/handler/sign-in'; return {} }
       if (!res.ok) { showToast('저장에 실패했습니다.', 'error'); return {} }
       const newItem = await res.json()
-      setAllItems(prev => [newItem, ...prev])
+      if (page === 1) {
+        setItems(prev => [newItem, ...prev.slice(0, PAGE_SIZE - 1)])
+      } else {
+        setPage(1)
+      }
+      setTotalCount(c => c + 1)
       showToast('링크가 저장되었습니다.')
     } catch {
       showToast('네트워크 오류가 발생했습니다.', 'error')
@@ -120,7 +159,7 @@ export default function DashboardPage() {
       if (res.status === 401) { window.location.href = '/handler/sign-in'; return }
       if (!res.ok) { showToast('수정에 실패했습니다.', 'error'); return }
       const updated = await res.json()
-      setAllItems(prev => prev.map(i => i.id === id ? updated : i))
+      setItems(prev => prev.map(i => (i.id === id ? updated : i)))
       if (updated.priceChanged) {
         showToast(`가격 변동: ${updated.oldPrice || '미입력'} → ${updates.price || '미입력'}`, 'warning')
       }
@@ -134,7 +173,8 @@ export default function DashboardPage() {
       const res = await fetch(`/api/links/${id}`, { method: 'DELETE' })
       if (res.status === 401) { window.location.href = '/handler/sign-in'; return }
       if (!res.ok) { showToast('삭제에 실패했습니다.', 'error'); return }
-      setAllItems(prev => prev.filter(i => i.id !== id))
+      setItems(prev => prev.filter(i => i.id !== id))
+      setTotalCount(c => Math.max(0, c - 1))
       showToast('삭제되었습니다.')
     } catch {
       showToast('네트워크 오류가 발생했습니다.', 'error')
@@ -165,23 +205,19 @@ export default function DashboardPage() {
   }
 
   const handleDeleteCategory = async (cat: Category) => {
-    const linkedCount = allItems.filter(i => i.category === cat.name).length
-    const msg = linkedCount > 0
-      ? `"${cat.name}" 카테고리를 삭제할까요? 해당 카테고리의 링크 ${linkedCount}개는 "기타"로 변경됩니다.`
-      : `"${cat.name}" 카테고리를 삭제할까요?`
+    const msg = `"${cat.name}" 카테고리를 삭제할까요? 해당 카테고리의 링크는 "기타"로 변경됩니다.`
     if (!confirm(msg)) return
     try {
       const res = await fetch(`/api/categories/${cat.id}`, { method: 'DELETE' })
       if (!res.ok) { showToast('카테고리 삭제에 실패했습니다.', 'error'); return }
       setCategories(prev => prev.filter(c => c.id !== cat.id))
-      if (categoryFilter === cat.name) setCategoryFilter('전체')
-      // 해당 카테고리 링크 → 기타로 변경 (클라이언트 반영)
-      if (linkedCount > 0) {
-        setAllItems(prev => prev.map(i => i.category === cat.name ? { ...i, category: '기타' } : i))
-        showToast(`"${cat.name}" 삭제 완료. ${linkedCount}개 링크가 "기타"로 변경되었습니다.`, 'warning')
+      if (categoryFilter === cat.name) {
+        setCategoryFilter('전체')
+        setPage(1)
       } else {
-        showToast(`"${cat.name}" 카테고리가 삭제되었습니다.`)
+        fetchLinks()
       }
+      showToast(`"${cat.name}" 카테고리가 삭제되었습니다.`)
     } catch {
       showToast('네트워크 오류가 발생했습니다.', 'error')
     }
@@ -194,47 +230,27 @@ export default function DashboardPage() {
 
   const categoryNames = categories.map(c => c.name)
 
-  const displayed = useMemo(() => {
-    let list = [...allItems]
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      list = list.filter(i =>
-        i.title.toLowerCase().includes(q) ||
-        (i.site_name || '').toLowerCase().includes(q) ||
-        i.category.toLowerCase().includes(q)
-      )
-    }
-    if (filter === 'favorite') list = list.filter(i => i.is_favorite)
-    else if (filter === 'no_price') list = list.filter(i => !i.price)
-    if (categoryFilter !== '전체') list = list.filter(i => i.category === categoryFilter)
-    list.sort((a, b) => {
-      if (sort === 'newest') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      if (sort === 'oldest') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-      if (sort === 'price_asc') return parsePrice(a.price) - parsePrice(b.price)
-      if (sort === 'price_desc') return parsePrice(b.price) - parsePrice(a.price)
-      if (sort === 'site') return (a.site_name || '').localeCompare(b.site_name || '')
-      return 0
-    })
-    return list
-  }, [allItems, search, filter, categoryFilter, sort])
-
   const totalBudget = useMemo(() => {
-    const priced = displayed.filter(i => i.price)
+    const priced = items.filter(i => i.price)
     if (priced.length === 0) return null
     const sum = priced.reduce((s, i) => s + parsePrice(i.price), 0)
     return '₩' + sum.toLocaleString('ko-KR')
-  }, [displayed])
+  }, [items])
 
   const gridClass =
     view === 'grid2' ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3' :
     view === 'grid3' ? 'grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-2' :
     'flex flex-col gap-2'
 
+  const goToPage = (nextPage: number) => {
+    setPage(nextPage)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 pb-6">
       <ToastContainer />
 
-      {/* 삭제 확인 모달 */}
       <ConfirmModal
         open={!!deleteTarget}
         message={deleteTarget ? `"${deleteTarget.title.slice(0, 30)}${deleteTarget.title.length > 30 ? '...' : ''}"을 삭제할까요?` : ''}
@@ -247,10 +263,9 @@ export default function DashboardPage() {
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-xl">📦</span>
-            <span className="font-black text-gray-900 tracking-tight text-lg">Damoajo</span>
+            <span className="font-black text-gray-900 tracking-tight text-lg">whatItems</span>
           </div>
           <div className="flex items-center gap-1">
-            <PriceAlertBell />
             <button
               onClick={() => setShowAddLink(true)}
               className="flex items-center gap-1 px-3 h-8 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-sm font-semibold rounded-xl transition-all"
@@ -290,7 +305,7 @@ export default function DashboardPage() {
         <div className="flex items-center gap-1.5 mb-3 overflow-x-auto pb-1">
           {['전체', ...categoryNames].map(cat => (
             <div key={cat} className="relative group flex-shrink-0">
-              <button onClick={() => setCategoryFilter(cat)}
+              <button onClick={() => { setCategoryFilter(cat); setPage(1) }}
                 className={`text-xs h-7 px-3 rounded-full border transition-all whitespace-nowrap ${
                   categoryFilter === cat ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-500 border-gray-200'
                 }`}>
@@ -314,17 +329,17 @@ export default function DashboardPage() {
         <Toolbar
           view={view} filter={filter} sort={sort}
           onViewChange={setView}
-          onFilterChange={f => setFilter(f)}
-          onSortChange={setSort}
-          totalCount={displayed.length}
+          onFilterChange={f => { setFilter(f); setPage(1) }}
+          onSortChange={s => { setSort(s); setPage(1) }}
+          totalCount={totalCount}
           totalBudget={totalBudget}
         />
 
         {loading ? (
           <div className={gridClass}>
-            {Array.from({ length: 6 }).map((_, i) => <CardSkeleton key={i} view={view} />)}
+            {Array.from({ length: 8 }).map((_, i) => <CardSkeleton key={i} view={view} />)}
           </div>
-        ) : displayed.length === 0 ? (
+        ) : items.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-gray-400">
             <span className="text-5xl mb-4">📦</span>
             <p className="text-sm font-medium">{search ? '검색 결과가 없습니다.' : '저장된 링크가 없습니다.'}</p>
@@ -333,21 +348,79 @@ export default function DashboardPage() {
         ) : (
           <>
             <div className={gridClass}>
-              {displayed.map(item => (
+              {items.map(item => (
                 <LinkCard
                   key={item.id}
                   item={item}
                   view={view}
                   onEdit={setEditItem}
-                  onDelete={id => setDeleteTarget(allItems.find(i => i.id === id) || null)}
+                  onDelete={id => setDeleteTarget(items.find(i => i.id === id) || null)}
                   onPriceHistory={() => setPriceHistoryItem({ id: item.id, title: item.title })}
                   onToggleFavorite={handleToggleFavorite}
                 />
               ))}
             </div>
-            {displayed.length > 0 && (
-              <p className="text-center text-xs text-gray-400 mt-6">총 {displayed.length}개</p>
-            )}
+
+            {/* 페이지네이션 */}
+                        {/* 페이지네이션 */}
+            <div className="flex flex-col items-center gap-3 mt-8">
+              {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-1 sm:gap-1.5 flex-wrap">
+                  <button
+                    onClick={() => goToPage(Math.max(1, page - 1))}
+                    disabled={page === 1}
+                    className="flex items-center gap-0.5 px-2.5 h-8 sm:h-9 text-xs font-medium bg-white border border-gray-200 rounded-xl text-gray-700 disabled:opacity-40 hover:bg-gray-50 transition-colors whitespace-nowrap flex-shrink-0"
+                  >
+                    <ChevronLeft size={14} /> 이전
+                  </button>
+
+                  {(() => {
+                    const pages: (number | '...')[] = []
+                    if (totalPages <= 5) {
+                      for (let i = 1; i <= totalPages; i++) pages.push(i)
+                    } else if (page <= 3) {
+                      pages.push(1, 2, 3, 4, '...', totalPages)
+                    } else if (page >= totalPages - 2) {
+                      pages.push(1, '...', totalPages - 3, totalPages - 2, totalPages - 1, totalPages)
+                    } else {
+                      pages.push(1, '...', page - 1, page, page + 1, '...', totalPages)
+                    }
+
+                    return pages.map((p, idx) =>
+                      p === '...' ? (
+                        <span key={`ellipsis-${idx}`} className="px-1 text-xs text-gray-400 select-none">
+                          …
+                        </span>
+                      ) : (
+                        <button
+                          key={p}
+                          onClick={() => goToPage(p)}
+                          className={`w-8 h-8 sm:w-9 sm:h-9 text-xs font-semibold rounded-xl border transition-colors flex-shrink-0 ${
+                            p === page
+                              ? 'bg-gray-900 text-white border-gray-900'
+                              : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      )
+                    )
+                  })()}
+
+                  <button
+                    onClick={() => goToPage(Math.min(totalPages, page + 1))}
+                    disabled={page === totalPages}
+                    className="flex items-center gap-0.5 px-2.5 h-8 sm:h-9 text-xs font-medium bg-white border border-gray-200 rounded-xl text-gray-700 disabled:opacity-40 hover:bg-gray-50 transition-colors whitespace-nowrap flex-shrink-0"
+                  >
+                    다음 <ChevronRight size={14} />
+                  </button>
+                </div>
+              )}
+              <p className="text-xs text-gray-400">
+                전체 {totalCount}개 중 {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)}번째
+              </p>
+            </div>
+
           </>
         )}
       </main>
@@ -373,7 +446,7 @@ export default function DashboardPage() {
       {showImportExport && (
         <ImportExportModal
           onClose={() => setShowImportExport(false)}
-          onImportDone={fetchAll}
+          onImportDone={() => { setPage(1); fetchLinks() }}
         />
       )}
     </div>

@@ -1,5 +1,6 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+
 import { Bell, X, TrendingDown, TrendingUp, Trash2 } from 'lucide-react'
 import { PriceAlert } from '@/types'
 import { showToast } from '@/components/Toast'
@@ -25,19 +26,26 @@ export default function PriceAlertBell() {
 
   const unread = alerts.filter(a => !a.is_read).length
 
-  const fetchAlerts = async () => {
+    const fetchedRef = useRef(false)
+
+  const fetchAlerts = useCallback(async (force = false) => {
+    if (!force && fetchedRef.current) return
+    fetchedRef.current = true
     setLoading(true)
     try {
       const res = await fetch('/api/price-alerts')
       if (res.ok) setAlerts(await res.json())
     } catch {
-      // 조용히 실패
+      fetchedRef.current = false
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
-  useEffect(() => { fetchAlerts() }, [])
+  useEffect(() => {
+    fetchAlerts()
+  }, [fetchAlerts])
+
 
   const markRead = async (id: string) => {
     await fetch('/api/price-alerts', {
@@ -76,11 +84,12 @@ export default function PriceAlertBell() {
       <button
         onClick={() => {
           setOpen(v => !v)
-          if (!open) {
-            fetchAlerts()
+                    if (!open) {
+            fetchAlerts(true)
             // 열 때 모두 읽음 처리
             if (unread > 0) markAllRead()
           }
+
         }}
         className="relative p-2 rounded-xl hover:bg-gray-100 text-gray-500 transition-colors"
       >
