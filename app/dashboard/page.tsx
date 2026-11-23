@@ -328,8 +328,6 @@ export default function DashboardPage() {
           onViewChange={setView}
           onFilterChange={f => { setFilter(f); setPage(1) }}
           onSortChange={s => { setSort(s); setPage(1) }}
-          totalCount={0}
-          totalBudget={null}
         />
 
         {loading ? (
