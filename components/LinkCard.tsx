@@ -10,7 +10,6 @@ interface Props {
   view: 'grid2' | 'grid3' | 'list'
   onEdit: (item: LinkItem) => void
   onDelete: (id: string) => void
-  onPriceHistory: () => void
   onToggleFavorite: (id: string, val: boolean) => void
 }
 
@@ -39,7 +38,7 @@ function ThumbImage({ src, alt, fill, width, height, className }: {
   return <Image src={src} alt={alt} width={width!} height={height!} className={className} unoptimized loading="lazy" onError={() => setError(true)} />
 }
 
-export default function LinkCard({ item, view, onEdit, onDelete, onPriceHistory, onToggleFavorite }: Props) {
+export default function LinkCard({ item, view, onEdit, onDelete, onToggleFavorite }: Props) {
   const displayPrice = formatPrice(item.price)
   const hasPriceChange = item.last_price && item.last_price !== item.price
   const thumbnail = safeThumb(item.thumbnail)
@@ -67,12 +66,6 @@ export default function LinkCard({ item, view, onEdit, onDelete, onPriceHistory,
               <span className="text-xs text-gray-400 truncate max-w-[80px] flex-shrink-0">
                 {item.site_name || getSiteLabel(item.url)}
               </span>
-              {displayPrice && (
-                <button onClick={onPriceHistory} className="text-xs font-bold text-blue-600 hover:underline flex-shrink-0">
-                  {displayPrice}
-                  {hasPriceChange && <span className="ml-0.5 text-[10px] text-green-500">↓</span>}
-                </button>
-              )}
             </div>
             <div className="flex items-center gap-0.5 flex-shrink-0">
               <button onClick={() => onToggleFavorite(item.id, !item.is_favorite)}
@@ -134,13 +127,6 @@ export default function LinkCard({ item, view, onEdit, onDelete, onPriceHistory,
             {item.title}
           </a>
         </div>
-
-        {displayPrice && (
-          <button onClick={onPriceHistory} className="text-left mb-2">
-            <span className="text-sm font-bold text-blue-600">{displayPrice}</span>
-            {hasPriceChange && <span className="ml-1.5 text-[10px] text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full">↓변동</span>}
-          </button>
-        )}
 
         <div className="flex items-center justify-between mt-auto pt-2 border-t border-gray-50">
           <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full truncate max-w-[60%]">{item.category}</span>

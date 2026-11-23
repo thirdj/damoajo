@@ -9,8 +9,6 @@ interface Props {
   onViewChange: (v: ViewMode) => void
   onFilterChange: (f: FilterMode) => void
   onSortChange: (s: SortMode) => void
-  totalCount: number
-  totalBudget: string | null
 }
 
 const SORT_OPTIONS: { value: SortMode; label: string }[] = [
@@ -62,13 +60,7 @@ export default function Toolbar({ view, filter, sort, onViewChange, onFilterChan
             className="text-xs text-gray-600 bg-transparent border-none outline-none cursor-pointer">
             {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
-          <span className="text-xs text-gray-400">· {totalCount}개</span>
         </div>
-        {totalBudget && (
-          <div className="text-xs bg-blue-50 px-3 py-1 rounded-full">
-            총액 <span className="font-bold text-blue-600">{totalBudget}</span>
-          </div>
-        )}
       </div>
     </div>
   )

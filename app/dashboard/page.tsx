@@ -1,22 +1,16 @@
 'use client'
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useUser } from '@stackframe/stack'
 import { LinkItem, ViewMode, SortMode, FilterMode, Category } from '@/types'
 import AddLinkBar from '@/components/AddLinkBar'
 import LinkCard from '@/components/LinkCard'
 import Toolbar from '@/components/Toolbar'
 import EditModal from '@/components/EditModal'
-import PriceHistoryModal from '@/components/PriceHistoryModal'
 import SearchBar from '@/components/SearchBar'
 import ImportExportModal from '@/components/ImportExportModal'
 import ToastContainer, { showToast } from '@/components/Toast'
 import ConfirmModal from '@/components/ConfirmModal'
 import { Plus, X, MoreVertical, LogOut, ChevronLeft, ChevronRight } from 'lucide-react'
-
-function parsePrice(p: string | null): number {
-  if (!p) return 0
-  return parseInt(p.replace(/[^0-9]/g, '')) || 0
-}
 
 function CardSkeleton({ view }: { view: ViewMode }) {
   if (view === 'list') {
@@ -48,8 +42,7 @@ export default function DashboardPage() {
   const user = useUser({ or: 'redirect' })
   const [items, setItems] = useState<LinkItem[]>([])
   const [page, setPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(1)
-  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(1) // <-- 여기(1): totalPages 상태 선언
 
   const [view, setView] = useState<ViewMode>('grid2')
   const [filter, setFilter] = useState<FilterMode>('all')
@@ -57,7 +50,6 @@ export default function DashboardPage() {
   const [categoryFilter, setCategoryFilter] = useState('전체')
   const [categories, setCategories] = useState<Category[]>([])
   const [editItem, setEditItem] = useState<LinkItem | null>(null)
-  const [priceHistoryItem, setPriceHistoryItem] = useState<{ id: string; title: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -67,9 +59,14 @@ export default function DashboardPage() {
   const [deleteTarget, setDeleteTarget] = useState<LinkItem | null>(null)
 
   const catsFetchedRef = useRef(false)
+  const isFirstSearchRender = useRef(true)
 
-  // 검색어 입력 시 300ms 디바운스 후 1페이지로 이동
+  // 초기 마운트 시에는 실행하지 않고, 사용자가 검색어를 실제로 입력했을 때만 실행
   useEffect(() => {
+    if (isFirstSearchRender.current) {
+      isFirstSearchRender.current = false
+      return
+    }
     const timer = setTimeout(() => {
       setDebouncedSearch(search)
       setPage(1)
@@ -77,7 +74,7 @@ export default function DashboardPage() {
     return () => clearTimeout(timer)
   }, [search])
 
-  // 카테고리 1회 조회
+
   useEffect(() => {
     if (catsFetchedRef.current) return
     catsFetchedRef.current = true
@@ -89,32 +86,40 @@ export default function DashboardPage() {
       .catch(() => {})
   }, [])
 
-  // 40개씩 링크 조회
-  const fetchLinks = useCallback(async () => {
+  const lastQueryKeyRef = useRef<string>('')
+
+  const fetchLinks = useCallback(async (force = false) => {
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: String(PAGE_SIZE),
+      search: debouncedSearch,
+      filter,
+      category: categoryFilter,
+      sort,
+    })
+    const queryKey = params.toString()
+
+    // 동일한 조건으로 이미 요청을 보냈다면 중복 호출 차단 (StrictMode 방어)
+    if (!force && lastQueryKeyRef.current === queryKey) return
+    lastQueryKeyRef.current = queryKey
+
     setLoading(true)
     try {
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: String(PAGE_SIZE),
-        search: debouncedSearch,
-        filter,
-        category: categoryFilter,
-        sort,
-      })
-      const res = await fetch(`/api/links?${params.toString()}`)
+      const res = await fetch(`/api/links?${queryKey}`)
       if (res.status === 401) {
         window.location.href = '/handler/sign-in'
         return
       }
       if (!res.ok) {
+        lastQueryKeyRef.current = '' // 실패 시 재시도 허용
         showToast('데이터를 불러오지 못했습니다.', 'error')
         return
       }
       const data = await res.json()
       setItems(data.items ?? [])
       setTotalPages(data.totalPages ?? 1)
-      setTotalCount(data.totalCount ?? 0)
     } catch {
+      lastQueryKeyRef.current = ''
       showToast('네트워크 오류가 발생했습니다.', 'error')
     } finally {
       setLoading(false)
@@ -124,6 +129,7 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchLinks()
   }, [fetchLinks])
+
 
   const handleAdd = async (linkData: Omit<LinkItem, 'id' | 'user_id' | 'created_at' | 'updated_at'>) => {
     try {
@@ -141,7 +147,6 @@ export default function DashboardPage() {
       } else {
         setPage(1)
       }
-      setTotalCount(c => c + 1)
       showToast('링크가 저장되었습니다.')
     } catch {
       showToast('네트워크 오류가 발생했습니다.', 'error')
@@ -174,7 +179,6 @@ export default function DashboardPage() {
       if (res.status === 401) { window.location.href = '/handler/sign-in'; return }
       if (!res.ok) { showToast('삭제에 실패했습니다.', 'error'); return }
       setItems(prev => prev.filter(i => i.id !== id))
-      setTotalCount(c => Math.max(0, c - 1))
       showToast('삭제되었습니다.')
     } catch {
       showToast('네트워크 오류가 발생했습니다.', 'error')
@@ -229,13 +233,6 @@ export default function DashboardPage() {
   }
 
   const categoryNames = categories.map(c => c.name)
-
-  const totalBudget = useMemo(() => {
-    const priced = items.filter(i => i.price)
-    if (priced.length === 0) return null
-    const sum = priced.reduce((s, i) => s + parsePrice(i.price), 0)
-    return '₩' + sum.toLocaleString('ko-KR')
-  }, [items])
 
   const gridClass =
     view === 'grid2' ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3' :
@@ -331,8 +328,8 @@ export default function DashboardPage() {
           onViewChange={setView}
           onFilterChange={f => { setFilter(f); setPage(1) }}
           onSortChange={s => { setSort(s); setPage(1) }}
-          totalCount={totalCount}
-          totalBudget={totalBudget}
+          totalCount={0}
+          totalBudget={null}
         />
 
         {loading ? (
@@ -355,72 +352,64 @@ export default function DashboardPage() {
                   view={view}
                   onEdit={setEditItem}
                   onDelete={id => setDeleteTarget(items.find(i => i.id === id) || null)}
-                  onPriceHistory={() => setPriceHistoryItem({ id: item.id, title: item.title })}
                   onToggleFavorite={handleToggleFavorite}
                 />
               ))}
             </div>
 
-            {/* 페이지네이션 */}
-                        {/* 페이지네이션 */}
-            <div className="flex flex-col items-center gap-3 mt-8">
-              {totalPages > 1 && (
-                <div className="flex items-center justify-center gap-1 sm:gap-1.5 flex-wrap">
-                  <button
-                    onClick={() => goToPage(Math.max(1, page - 1))}
-                    disabled={page === 1}
-                    className="flex items-center gap-0.5 px-2.5 h-8 sm:h-9 text-xs font-medium bg-white border border-gray-200 rounded-xl text-gray-700 disabled:opacity-40 hover:bg-gray-50 transition-colors whitespace-nowrap flex-shrink-0"
-                  >
-                    <ChevronLeft size={14} /> 이전
-                  </button>
+            {/* <-- 여기(3): totalPages 기반 페이지 번호 버튼 */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-center gap-1 sm:gap-1.5 flex-wrap mt-8">
+                <button
+                  onClick={() => goToPage(Math.max(1, page - 1))}
+                  disabled={page === 1}
+                  className="flex items-center gap-0.5 px-2.5 h-8 sm:h-9 text-xs font-medium bg-white border border-gray-200 rounded-xl text-gray-700 disabled:opacity-40 hover:bg-gray-50 transition-colors whitespace-nowrap flex-shrink-0"
+                >
+                  <ChevronLeft size={14} /> 이전
+                </button>
 
-                  {(() => {
-                    const pages: (number | '...')[] = []
-                    if (totalPages <= 5) {
-                      for (let i = 1; i <= totalPages; i++) pages.push(i)
-                    } else if (page <= 3) {
-                      pages.push(1, 2, 3, 4, '...', totalPages)
-                    } else if (page >= totalPages - 2) {
-                      pages.push(1, '...', totalPages - 3, totalPages - 2, totalPages - 1, totalPages)
-                    } else {
-                      pages.push(1, '...', page - 1, page, page + 1, '...', totalPages)
-                    }
+                {(() => {
+                  const pages: (number | '...')[] = []
+                  if (totalPages <= 5) {
+                    for (let i = 1; i <= totalPages; i++) pages.push(i)
+                  } else if (page <= 3) {
+                    pages.push(1, 2, 3, 4, '...', totalPages)
+                  } else if (page >= totalPages - 2) {
+                    pages.push(1, '...', totalPages - 3, totalPages - 2, totalPages - 1, totalPages)
+                  } else {
+                    pages.push(1, '...', page - 1, page, page + 1, '...', totalPages)
+                  }
 
-                    return pages.map((p, idx) =>
-                      p === '...' ? (
-                        <span key={`ellipsis-${idx}`} className="px-1 text-xs text-gray-400 select-none">
-                          …
-                        </span>
-                      ) : (
-                        <button
-                          key={p}
-                          onClick={() => goToPage(p)}
-                          className={`w-8 h-8 sm:w-9 sm:h-9 text-xs font-semibold rounded-xl border transition-colors flex-shrink-0 ${
-                            p === page
-                              ? 'bg-gray-900 text-white border-gray-900'
-                              : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                          }`}
-                        >
-                          {p}
-                        </button>
-                      )
+                  return pages.map((p, idx) =>
+                    p === '...' ? (
+                      <span key={`ellipsis-${idx}`} className="px-1 text-xs text-gray-400 select-none">
+                        …
+                      </span>
+                    ) : (
+                      <button
+                        key={p}
+                        onClick={() => goToPage(p)}
+                        className={`w-8 h-8 sm:w-9 sm:h-9 text-xs font-semibold rounded-xl border transition-colors flex-shrink-0 ${
+                          p === page
+                            ? 'bg-gray-900 text-white border-gray-900'
+                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        {p}
+                      </button>
                     )
-                  })()}
+                  )
+                })()}
 
-                  <button
-                    onClick={() => goToPage(Math.min(totalPages, page + 1))}
-                    disabled={page === totalPages}
-                    className="flex items-center gap-0.5 px-2.5 h-8 sm:h-9 text-xs font-medium bg-white border border-gray-200 rounded-xl text-gray-700 disabled:opacity-40 hover:bg-gray-50 transition-colors whitespace-nowrap flex-shrink-0"
-                  >
-                    다음 <ChevronRight size={14} />
-                  </button>
-                </div>
-              )}
-              <p className="text-xs text-gray-400">
-                전체 {totalCount}개 중 {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)}번째
-              </p>
-            </div>
-
+                <button
+                  onClick={() => goToPage(Math.min(totalPages, page + 1))}
+                  disabled={page === totalPages}
+                  className="flex items-center gap-0.5 px-2.5 h-8 sm:h-9 text-xs font-medium bg-white border border-gray-200 rounded-xl text-gray-700 disabled:opacity-40 hover:bg-gray-50 transition-colors whitespace-nowrap flex-shrink-0"
+                >
+                  다음 <ChevronRight size={14} />
+                </button>
+              </div>
+            )}
           </>
         )}
       </main>
@@ -434,13 +423,6 @@ export default function DashboardPage() {
         categories={['기타', ...categoryNames]}
         onSave={handleEdit}
         onClose={() => setEditItem(null)}
-        onPriceHistory={editItem ? () => { setEditItem(null); setPriceHistoryItem({ id: editItem.id, title: editItem.title }) } : undefined}
-      />
-
-      <PriceHistoryModal
-        linkId={priceHistoryItem?.id ?? null}
-        linkTitle={priceHistoryItem?.title ?? ''}
-        onClose={() => setPriceHistoryItem(null)}
       />
 
       {showImportExport && (

@@ -12,13 +12,13 @@ export const viewport: Viewport = {
 }
 
 export const metadata: Metadata = {
-  title: 'Damoajo - 링크 보관함',
+  title: 'whatItems - 링크 보관함',
   description: '링크를 한 곳에 모아두는 나만의 즐겨찾기',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'Damoajo',
+    title: 'whatItems',
   },
   icons: {
     icon: '/favicon.svg',
