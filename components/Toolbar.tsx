@@ -25,7 +25,7 @@ const FILTERS: { key: FilterMode; label: string }[] = [
   { key: 'no_price', label: '가격 없음' },
 ]
 
-export default function Toolbar({ view, filter, sort, onViewChange, onFilterChange, onSortChange, totalCount, totalBudget }: Props) {
+export default function Toolbar({ view, filter, sort, onViewChange, onFilterChange, onSortChange }: Props) {
   return (
     <div className="space-y-2 mb-4">
       <div className="flex items-center justify-between gap-2">
